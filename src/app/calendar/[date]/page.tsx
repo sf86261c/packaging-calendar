@@ -22,15 +22,6 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 
-// Category display config
-const CATEGORY_LABELS: Record<string, string> = {
-  cake: '🍰 蜂蜜蛋糕',
-  tube: '🫙 旋轉筒',
-  single_cake: '🍰 單入蛋糕',
-  cookie: '🍪 曲奇',
-}
-
-// Which packaging styles belong to which category
 const PACKAGING_CATEGORIES: Record<string, string[]> = {
   cake: ['祝福緞帶(米)', '森林旋律(粉)', '歡樂派對(藍)'],
   tube: ['四季童話', '銀河探險', '旋轉木馬'],
@@ -43,10 +34,12 @@ interface OrderRow {
   status: string
   batch_info: string | null
   printed: boolean
-  packaging_style?: { id: string; name: string } | null
-  branding_style?: { id: string; name: string } | null
+  cake_packaging?: { id: string; name: string } | null
+  cake_branding?: { id: string; name: string } | null
+  tube_packaging?: { id: string; name: string } | null
+  single_cake_packaging?: { id: string; name: string } | null
+  single_cake_branding_text: string | null
   items: { name: string; category: string; quantity: number }[]
-  notes: string | null
 }
 
 export default function DayOrderPage() {
@@ -67,10 +60,13 @@ export default function DayOrderPage() {
   const [formName, setFormName] = useState('')
   const [formStatus, setFormStatus] = useState('')
   const [formBatch, setFormBatch] = useState('')
-  const [formPackaging, setFormPackaging] = useState('')
-  const [formBranding, setFormBranding] = useState('')
-  const [formNotes, setFormNotes] = useState('')
   const [formItems, setFormItems] = useState<Record<string, number>>({})
+  // Per-category packaging/branding
+  const [formCakePackaging, setFormCakePackaging] = useState('')
+  const [formCakeBranding, setFormCakeBranding] = useState('')
+  const [formTubePackaging, setFormTubePackaging] = useState('')
+  const [formSingleCakePackaging, setFormSingleCakePackaging] = useState('')
+  const [formSingleCakeBranding, setFormSingleCakeBranding] = useState('')
   const [saving, setSaving] = useState(false)
 
   const fetchOrders = useCallback(async () => {
@@ -78,9 +74,11 @@ export default function DayOrderPage() {
     const { data } = await supabase
       .from('orders')
       .select(`
-        id, customer_name, status, batch_info, printed, notes,
-        packaging_style:packaging_styles(id, name),
-        branding_style:branding_styles(id, name),
+        id, customer_name, status, batch_info, printed, single_cake_branding_text,
+        cake_packaging:packaging_styles!orders_cake_packaging_id_fkey(id, name),
+        cake_branding:branding_styles!orders_cake_branding_id_fkey(id, name),
+        tube_packaging:packaging_styles!orders_tube_packaging_id_fkey(id, name),
+        single_cake_packaging:packaging_styles!orders_single_cake_packaging_id_fkey(id, name),
         order_items(quantity, product:products(id, name, category))
       `)
       .eq('order_date', dateStr)
@@ -93,9 +91,11 @@ export default function DayOrderPage() {
         status: o.status,
         batch_info: o.batch_info,
         printed: o.printed,
-        notes: o.notes,
-        packaging_style: o.packaging_style,
-        branding_style: o.branding_style,
+        cake_packaging: o.cake_packaging,
+        cake_branding: o.cake_branding,
+        tube_packaging: o.tube_packaging,
+        single_cake_packaging: o.single_cake_packaging,
+        single_cake_branding_text: o.single_cake_branding_text,
         items: (o.order_items || [])
           .filter((i: any) => i.quantity > 0)
           .map((i: any) => ({
@@ -123,13 +123,11 @@ export default function DayOrderPage() {
   }, [fetchOrders])
 
   const resetForm = () => {
-    setFormName('')
-    setFormStatus('')
-    setFormBatch('')
-    setFormPackaging('')
-    setFormBranding('')
-    setFormNotes('')
+    setFormName(''); setFormStatus(''); setFormBatch('')
     setFormItems({})
+    setFormCakePackaging(''); setFormCakeBranding('')
+    setFormTubePackaging('')
+    setFormSingleCakePackaging(''); setFormSingleCakeBranding('')
   }
 
   const handleAddOrder = async () => {
@@ -143,9 +141,11 @@ export default function DayOrderPage() {
         customer_name: formName.trim(),
         status: formStatus || '待',
         batch_info: formBatch || null,
-        packaging_id: formPackaging || null,
-        branding_id: formBranding || null,
-        notes: formNotes || null,
+        cake_packaging_id: formCakePackaging || null,
+        cake_branding_id: formCakeBranding || null,
+        tube_packaging_id: formTubePackaging || null,
+        single_cake_packaging_id: formSingleCakePackaging || null,
+        single_cake_branding_text: formSingleCakeBranding || null,
       })
       .select('id')
       .single()
@@ -183,38 +183,47 @@ export default function DayOrderPage() {
   const weekday = format(date, 'EEEE', { locale: zhTW })
   const dateDisplay = format(date, 'yyyy 年 M 月 d 日', { locale: zhTW })
 
-  // Group products by category for the form
+  // Group products by category
   const cakeProducts = products.filter(p => p.category === 'cake')
   const tubeProducts = products.filter(p => p.category === 'tube')
   const singleCakeProducts = products.filter(p => p.category === 'single_cake')
   const cookieProducts = products.filter(p => p.category === 'cookie')
 
-  // Determine which categories have items in the form (for packaging/branding filtering)
+  // Check which categories have quantities in form
   const formHasCake = cakeProducts.some(p => (formItems[p.id] || 0) > 0)
   const formHasTube = tubeProducts.some(p => (formItems[p.id] || 0) > 0)
   const formHasSingle = singleCakeProducts.some(p => (formItems[p.id] || 0) > 0)
 
-  // Filter packaging based on what's in the order
-  const availablePackaging = packagingStyles.filter(ps => {
-    if (formHasCake && PACKAGING_CATEGORIES.cake?.includes(ps.name)) return true
-    if (formHasTube && PACKAGING_CATEGORIES.tube?.includes(ps.name)) return true
-    if (formHasSingle && PACKAGING_CATEGORIES.single_cake?.includes(ps.name)) return true
-    // If nothing selected yet, show all
-    if (!formHasCake && !formHasTube && !formHasSingle) return true
-    return false
-  })
+  // Filter packaging per category
+  const cakePackagingOptions = packagingStyles.filter(ps => PACKAGING_CATEGORIES.cake?.includes(ps.name))
+  const tubePackagingOptions = packagingStyles.filter(ps => PACKAGING_CATEGORIES.tube?.includes(ps.name))
+  const singleCakePackagingOptions = packagingStyles.filter(ps => PACKAGING_CATEGORIES.single_cake?.includes(ps.name))
+
+  // Helper to find name by id
+  const pkgName = (id: string) => packagingStyles.find(p => p.id === id)?.name || '選擇'
+  const brandName = (id: string) => brandingStyles.find(b => b.id === id)?.name || '選擇'
 
   // Summary stats
   const totalOrders = orders.length
-  const cakeBoxes = orders.reduce((sum, o) => sum + o.items.filter(i => i.category === 'cake').reduce((s, i) => s + i.quantity, 0), 0)
-  const tubeCount = orders.reduce((sum, o) => sum + o.items.filter(i => i.category === 'tube').reduce((s, i) => s + i.quantity, 0), 0)
-  const singleCount = orders.reduce((sum, o) => sum + o.items.filter(i => i.category === 'single_cake').reduce((s, i) => s + i.quantity, 0), 0)
-  const cookieCount = orders.reduce((sum, o) => sum + o.items.filter(i => i.category === 'cookie').reduce((s, i) => s + i.quantity, 0), 0)
+  const cakeBoxes = orders.reduce((s, o) => s + o.items.filter(i => i.category === 'cake').reduce((a, i) => a + i.quantity, 0), 0)
+  const tubeCount = orders.reduce((s, o) => s + o.items.filter(i => i.category === 'tube').reduce((a, i) => a + i.quantity, 0), 0)
+  const singleCount = orders.reduce((s, o) => s + o.items.filter(i => i.category === 'single_cake').reduce((a, i) => a + i.quantity, 0), 0)
+  const cookieCount = orders.reduce((s, o) => s + o.items.filter(i => i.category === 'cookie').reduce((a, i) => a + i.quantity, 0), 0)
   const printedCount = orders.filter(o => o.printed).length
+
+  // Build packaging/branding summary for table display
+  const orderMeta = (o: OrderRow) => {
+    const parts: string[] = []
+    if (o.cake_packaging?.name) parts.push(`🍰${o.cake_packaging.name}`)
+    if (o.cake_branding?.name) parts.push(`烙:${o.cake_branding.name}`)
+    if (o.tube_packaging?.name) parts.push(`🫙${o.tube_packaging.name}`)
+    if (o.single_cake_packaging?.name) parts.push(`📦${o.single_cake_packaging.name}`)
+    if (o.single_cake_branding_text) parts.push(`字:${o.single_cake_branding_text}`)
+    return parts
+  }
 
   return (
     <div>
-      {/* Header */}
       <div className="mb-6">
         <div className="mb-2 flex items-center gap-2">
           <Button variant="ghost" size="icon" onClick={() => router.push('/calendar')}>
@@ -234,7 +243,6 @@ export default function DayOrderPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
-        {/* Order table */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <CardTitle className="text-base">訂單列表 ({orders.length} 筆)</CardTitle>
@@ -251,8 +259,7 @@ export default function DayOrderPage() {
                     <TableHead className="w-16">狀態</TableHead>
                     <TableHead className="w-20">客戶</TableHead>
                     <TableHead>品項</TableHead>
-                    <TableHead className="w-20">烙印</TableHead>
-                    <TableHead className="w-20">包裝</TableHead>
+                    <TableHead className="w-40">包裝/烙印</TableHead>
                     <TableHead className="w-10"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -274,13 +281,19 @@ export default function DayOrderPage() {
                         <div className="flex flex-wrap gap-1">
                           {order.items.map((item, idx) => (
                             <Badge key={idx} variant="secondary" className="text-[10px] px-1.5 py-0">
-                              {item.name.replace('旋轉筒-', '🫙').replace('單入-', '📦')} x{item.quantity}
+                              {item.name.replace('旋轉筒-', '🫙').replace('單入-', '📦')} ×{item.quantity}
                             </Badge>
                           ))}
                         </div>
                       </TableCell>
-                      <TableCell className="text-xs">{order.branding_style?.name || '-'}</TableCell>
-                      <TableCell className="text-xs">{order.packaging_style?.name || '-'}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {orderMeta(order).map((m, i) => (
+                            <Badge key={i} variant="outline" className="text-[10px] px-1 py-0">{m}</Badge>
+                          ))}
+                          {orderMeta(order).length === 0 && <span className="text-xs text-gray-300">-</span>}
+                        </div>
+                      </TableCell>
                       <TableCell>
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-600" onClick={() => handleDelete(order.id)}>
                           <Trash2 className="h-3.5 w-3.5" />
@@ -290,7 +303,7 @@ export default function DayOrderPage() {
                   ))}
                   {orders.length === 0 && !loading && (
                     <TableRow>
-                      <TableCell colSpan={7} className="py-8 text-center text-gray-400">
+                      <TableCell colSpan={6} className="py-8 text-center text-gray-400">
                         今天還沒有訂單，點擊「新增訂單」開始
                       </TableCell>
                     </TableRow>
@@ -301,7 +314,6 @@ export default function DayOrderPage() {
           </CardContent>
         </Card>
 
-        {/* Sidebar stats */}
         <div className="space-y-4">
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm">當日統計</CardTitle></CardHeader>
@@ -336,7 +348,6 @@ export default function DayOrderPage() {
             <DialogTitle>新增訂單 — {dateDisplay}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
-            {/* Customer + Status */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>客戶姓名 *</Label>
@@ -352,125 +363,117 @@ export default function DayOrderPage() {
               <Input value={formBatch} onChange={e => setFormBatch(e.target.value)} placeholder="e.g. 分批2." />
             </div>
 
-            {/* Cake combos */}
+            {/* === 蜂蜜蛋糕 === */}
             {cakeProducts.length > 0 && (
-              <div>
-                <Label className="mb-2 block">🍰 蜂蜜蛋糕（盒）</Label>
-                <div className="grid grid-cols-1 gap-2">
-                  {cakeProducts.map(p => (
-                    <div key={p.id} className="flex items-center gap-2">
-                      <span className="text-sm w-40 truncate">{p.name}</span>
-                      <Input
-                        type="number" min={0} className="w-20"
-                        value={formItems[p.id] || ''}
-                        onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))}
-                        placeholder="0"
-                      />
+              <div className="rounded-lg border p-3 space-y-2">
+                <Label className="text-sm font-semibold">🍰 蜂蜜蛋糕（盒）</Label>
+                {cakeProducts.map(p => (
+                  <div key={p.id} className="flex items-center gap-2">
+                    <span className="text-sm w-40 truncate">{p.name}</span>
+                    <Input type="number" min={0} className="w-20" value={formItems[p.id] || ''} onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))} placeholder="0" />
+                  </div>
+                ))}
+                {formHasCake && (
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t mt-2">
+                    <div>
+                      <Label className="text-xs">烙印款式</Label>
+                      <Select value={formCakeBranding} onValueChange={(v) => v && setFormCakeBranding(v)}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="選擇">{formCakeBranding ? brandName(formCakeBranding) : '選擇'}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {brandingStyles.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
                     </div>
-                  ))}
-                </div>
+                    <div>
+                      <Label className="text-xs">包裝款式</Label>
+                      <Select value={formCakePackaging} onValueChange={(v) => v && setFormCakePackaging(v)}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="選擇">{formCakePackaging ? pkgName(formCakePackaging) : '選擇'}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {cakePackagingOptions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Tube */}
+            {/* === 旋轉筒 === */}
             {tubeProducts.length > 0 && (
-              <div>
-                <Label className="mb-2 block">🫙 旋轉筒</Label>
-                <div className="grid grid-cols-1 gap-2">
-                  {tubeProducts.map(p => (
-                    <div key={p.id} className="flex items-center gap-2">
-                      <span className="text-sm w-40 truncate">{p.name}</span>
-                      <Input
-                        type="number" min={0} className="w-20"
-                        value={formItems[p.id] || ''}
-                        onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))}
-                        placeholder="0"
-                      />
-                    </div>
-                  ))}
-                </div>
+              <div className="rounded-lg border p-3 space-y-2">
+                <Label className="text-sm font-semibold">🫙 旋轉筒</Label>
+                {tubeProducts.map(p => (
+                  <div key={p.id} className="flex items-center gap-2">
+                    <span className="text-sm w-40 truncate">{p.name}</span>
+                    <Input type="number" min={0} className="w-20" value={formItems[p.id] || ''} onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))} placeholder="0" />
+                  </div>
+                ))}
+                {formHasTube && (
+                  <div className="pt-2 border-t mt-2">
+                    <Label className="text-xs">包裝款式</Label>
+                    <Select value={formTubePackaging} onValueChange={(v) => v && setFormTubePackaging(v)}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue placeholder="選擇">{formTubePackaging ? pkgName(formTubePackaging) : '選擇'}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {tubePackagingOptions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Single cake */}
+            {/* === 單入蛋糕 === */}
             {singleCakeProducts.length > 0 && (
-              <div>
-                <Label className="mb-2 block">📦 單入蛋糕</Label>
-                <div className="grid grid-cols-1 gap-2">
-                  {singleCakeProducts.map(p => (
-                    <div key={p.id} className="flex items-center gap-2">
-                      <span className="text-sm w-40 truncate">{p.name}</span>
-                      <Input
-                        type="number" min={0} className="w-20"
-                        value={formItems[p.id] || ''}
-                        onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))}
-                        placeholder="0"
-                      />
+              <div className="rounded-lg border p-3 space-y-2">
+                <Label className="text-sm font-semibold">📦 單入蛋糕</Label>
+                {singleCakeProducts.map(p => (
+                  <div key={p.id} className="flex items-center gap-2">
+                    <span className="text-sm w-40 truncate">{p.name}</span>
+                    <Input type="number" min={0} className="w-20" value={formItems[p.id] || ''} onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))} placeholder="0" />
+                  </div>
+                ))}
+                {formHasSingle && (
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t mt-2">
+                    <div>
+                      <Label className="text-xs">烙印文字</Label>
+                      <Input className="h-8 text-xs" value={formSingleCakeBranding} onChange={e => setFormSingleCakeBranding(e.target.value)} placeholder="自由輸入" />
                     </div>
-                  ))}
-                </div>
+                    <div>
+                      <Label className="text-xs">包裝款式</Label>
+                      <Select value={formSingleCakePackaging} onValueChange={(v) => v && setFormSingleCakePackaging(v)}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="選擇">{formSingleCakePackaging ? pkgName(formSingleCakePackaging) : '選擇'}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {singleCakePackagingOptions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Cookie */}
+            {/* === 曲奇（無包裝/烙印） === */}
             {cookieProducts.length > 0 && (
-              <div>
-                <Label className="mb-2 block">🍪 曲奇</Label>
+              <div className="rounded-lg border p-3 space-y-2">
+                <Label className="text-sm font-semibold">🍪 曲奇</Label>
                 <div className="grid grid-cols-2 gap-2">
                   {cookieProducts.map(p => (
                     <div key={p.id} className="flex items-center gap-2">
                       <span className="text-sm w-24 truncate">{p.name}</span>
-                      <Input
-                        type="number" min={0} className="w-20"
-                        value={formItems[p.id] || ''}
-                        onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))}
-                        placeholder="0"
-                      />
+                      <Input type="number" min={0} className="w-20" value={formItems[p.id] || ''} onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))} placeholder="0" />
                     </div>
                   ))}
                 </div>
               </div>
             )}
-
-            {/* Branding — only enabled when cake has quantities */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>烙印款式 {!formHasCake && <span className="text-xs text-gray-400">（需選蛋糕）</span>}</Label>
-                <Select
-                  value={formBranding}
-                  onValueChange={(v) => v && setFormBranding(v)}
-                  disabled={!formHasCake}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="選擇">
-                      {formBranding ? brandingStyles.find(b => b.id === formBranding)?.name || '選擇' : '選擇'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {brandingStyles.map(b => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>包裝款式</Label>
-                <Select value={formPackaging} onValueChange={(v) => v && setFormPackaging(v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="選擇">
-                      {formPackaging ? packagingStyles.find(p => p.id === formPackaging)?.name || '選擇' : '選擇'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availablePackaging.map(p => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
 
             <Button className="w-full" onClick={handleAddOrder} disabled={saving || !formName.trim()}>
               {saving ? '儲存中...' : '新增訂單'}
