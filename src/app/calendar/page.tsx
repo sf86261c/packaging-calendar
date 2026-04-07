@@ -42,7 +42,7 @@ export default function CalendarPage() {
 
       const { data: orders } = await supabase
         .from('orders')
-        .select('id, order_date, status, order_items(quantity, product:products(category))')
+        .select('id, order_date, status, printed, order_items(quantity, product:products(category))')
         .gte('order_date', monthStart)
         .lte('order_date', monthEnd)
 
@@ -52,11 +52,11 @@ export default function CalendarPage() {
           const date = order.order_date
           if (!map[date]) map[date] = { orders: 0, cakes: 0, cookies: 0, tubes: 0, pending: 0 }
           map[date].orders++
-          if (['待', '延'].includes(order.status)) map[date].pending++
+          if (!(order as any).printed) map[date].pending++
           const items = (order as any).order_items || []
           for (const item of items) {
             const cat = item.product?.category
-            if (cat === 'cake') map[date].cakes += item.quantity
+            if (cat === 'cake' || cat === 'single_cake') map[date].cakes += item.quantity
             else if (cat === 'cookie') map[date].cookies += item.quantity
             else if (cat === 'tube') map[date].tubes += item.quantity
           }
@@ -124,7 +124,7 @@ export default function CalendarPage() {
                   </div>
                   {s.pending > 0 && (
                     <Badge variant="outline" className="text-[10px] px-1 py-0 border-orange-300 text-orange-600">
-                      待處理 {s.pending}
+                      未列印 {s.pending}
                     </Badge>
                   )}
                 </div>

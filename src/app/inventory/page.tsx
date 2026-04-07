@@ -23,7 +23,7 @@ interface ProductStock {
 }
 
 const SAFETY_STOCK: Record<string, number> = {
-  cake: 2000,
+  cake_bar: 2000,
   cookie: 200,
   tube: 100,
 }
@@ -88,7 +88,7 @@ export default function InventoryPage() {
     fetchInventory()
   }
 
-  const cakes = products.filter(p => p.category === 'cake')
+  const cakes = products.filter(p => p.category === 'cake_bar')
   const cookies = products.filter(p => p.category === 'cookie')
   const tubes = products.filter(p => p.category === 'tube')
 
@@ -158,7 +158,7 @@ export default function InventoryPage() {
 
       {cakes.length > 0 && (
         <div className="mb-6">
-          <h2 className="mb-3 text-lg font-semibold">🍰 蜂蜜蛋糕</h2>
+          <h2 className="mb-3 text-lg font-semibold">🍰 蜂蜜蛋糕（條）</h2>
           <div className="grid gap-3 sm:grid-cols-3">{cakes.map(renderCard)}</div>
         </div>
       )}

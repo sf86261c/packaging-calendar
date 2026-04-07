@@ -31,7 +31,7 @@ export default function DashboardPage() {
       const { data: orders } = await supabase
         .from('orders')
         .select(`
-          id, status,
+          id, status, printed,
           packaging_style:packaging_styles(name),
           order_items(quantity, product:products(name, category))
         `)
@@ -45,13 +45,13 @@ export default function DashboardPage() {
       if (orders) {
         totalOrders = orders.length
         for (const o of orders as any[]) {
-          if (['待', '延'].includes(o.status)) pendingCount++
+          if (!o.printed) pendingCount++
           const pkgName = o.packaging_style?.name
           if (pkgName) pkgMap[pkgName] = (pkgMap[pkgName] || 0) + 1
           for (const item of (o.order_items || [])) {
             const cat = item.product?.category
             const name = item.product?.name
-            if (cat === 'cake') totalCakes += item.quantity
+            if (cat === 'cake' || cat === 'single_cake' || cat === 'tube') totalCakes += item.quantity
             if (cat === 'cookie') {
               totalCookies += item.quantity
               if (name) cookieMap[name] = (cookieMap[name] || 0) + item.quantity
@@ -108,7 +108,7 @@ export default function DashboardPage() {
           <CardContent><div className="text-3xl font-bold">{stats.totalCookies.toLocaleString()}</div><p className="text-xs text-gray-500">個</p></CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500">待處理</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500">未列印</CardTitle></CardHeader>
           <CardContent><div className="text-3xl font-bold text-orange-600">{stats.pendingCount}</div><p className="text-xs text-gray-500">筆訂單</p></CardContent>
         </Card>
       </div>

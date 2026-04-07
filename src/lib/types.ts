@@ -1,8 +1,4 @@
-export type ProductCategory = 'cake' | 'cookie' | 'tube' | 'pineapple'
-
-export type OrderStatus = '寄出' | '自取' | '送' | '豐原' | '待' | '延' | '到' | '取'
-
-export type PaymentStatus = 'unpaid' | 'paid_printed' | 'paid'
+export type ProductCategory = 'cake' | 'cake_bar' | 'cookie' | 'tube' | 'single_cake' | 'pineapple'
 
 export type InventoryType = 'inbound' | 'outbound' | 'adjustment'
 
@@ -35,7 +31,7 @@ export interface Order {
   batch_info: string | null
   packaging_id: string | null
   branding_id: string | null
-  payment_status: PaymentStatus
+  printed: boolean
   notes: string | null
   created_by: string | null
   created_at: string

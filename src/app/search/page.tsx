@@ -13,7 +13,7 @@ interface SearchResult {
   customer_name: string
   order_date: string
   status: string
-  payment_status: string
+  printed: boolean
   packaging_style: { name: string } | null
   items_summary: string
 }
@@ -39,7 +39,7 @@ export default function SearchPage() {
     const { data } = await supabase
       .from('orders')
       .select(`
-        id, customer_name, order_date, status, payment_status,
+        id, customer_name, order_date, status, printed,
         packaging_style:packaging_styles(name),
         order_items(quantity, product:products(name))
       `)
@@ -58,7 +58,7 @@ export default function SearchPage() {
           customer_name: o.customer_name,
           order_date: o.order_date,
           status: o.status,
-          payment_status: o.payment_status,
+          printed: o.printed,
           packaging_style: o.packaging_style,
           items_summary: items || '無品項',
         }
@@ -66,12 +66,6 @@ export default function SearchPage() {
       setResults(rows)
     }
     setLoading(false)
-  }
-
-  const paymentLabel: Record<string, string> = {
-    unpaid: '未付款',
-    paid_printed: '已付已印單',
-    paid: '已付款',
   }
 
   return (
@@ -96,7 +90,7 @@ export default function SearchPage() {
           {results.map((r) => (
             <Card
               key={r.id}
-              className="cursor-pointer transition-colors hover:bg-gray-50"
+              className={`cursor-pointer transition-colors hover:bg-gray-50 ${r.printed ? 'bg-yellow-50' : ''}`}
               onClick={() => router.push(`/calendar/${r.order_date}`)}
             >
               <CardContent className="flex items-center justify-between py-3">
@@ -104,7 +98,8 @@ export default function SearchPage() {
                   <div className="font-medium">{r.customer_name}</div>
                   <div className="text-sm text-gray-500">{r.order_date} · {r.items_summary}</div>
                   <div className="text-xs text-gray-400">
-                    {r.packaging_style?.name || '未指定包裝'} · {paymentLabel[r.payment_status] || r.payment_status}
+                    {r.packaging_style?.name || '未指定包裝'}
+                    {r.printed && ' · ✅ 已列印'}
                   </div>
                 </div>
                 <Badge variant="outline">{r.status}</Badge>

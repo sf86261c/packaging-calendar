@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -21,24 +22,31 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 
-const STATUS_OPTIONS = ['待', '寄出', '自取', '送', '豐原', '到', '取', '延']
-const PAYMENT_OPTIONS = [
-  { value: 'unpaid', label: '未付款', color: 'bg-amber-100' },
-  { value: 'paid_printed', label: '已付已印單', color: 'bg-yellow-200' },
-  { value: 'paid', label: '已付款', color: 'bg-white' },
-]
+// Category display config
+const CATEGORY_LABELS: Record<string, string> = {
+  cake: '🍰 蜂蜜蛋糕',
+  tube: '🫙 旋轉筒',
+  single_cake: '🍰 單入蛋糕',
+  cookie: '🍪 曲奇',
+}
+
+// Which packaging styles belong to which category
+const PACKAGING_CATEGORIES: Record<string, string[]> = {
+  cake: ['祝福緞帶(米)', '森林旋律(粉)', '歡樂派對(藍)'],
+  tube: ['四季童話', '銀河探險', '旋轉木馬'],
+  single_cake: ['愛心', '花園', '小熊'],
+}
 
 interface OrderRow {
   id: string
   customer_name: string
   status: string
   batch_info: string | null
-  payment_status: string
+  printed: boolean
   packaging_style?: { id: string; name: string } | null
   branding_style?: { id: string; name: string } | null
-  items: Record<string, number>
-  cake_boxes: number
-  cookie_boxes: number
+  items: { name: string; category: string; quantity: number }[]
+  notes: string | null
 }
 
 export default function DayOrderPage() {
@@ -57,10 +65,11 @@ export default function DayOrderPage() {
 
   // Form state
   const [formName, setFormName] = useState('')
-  const [formStatus, setFormStatus] = useState('待')
+  const [formStatus, setFormStatus] = useState('')
   const [formBatch, setFormBatch] = useState('')
   const [formPackaging, setFormPackaging] = useState('')
   const [formBranding, setFormBranding] = useState('')
+  const [formNotes, setFormNotes] = useState('')
   const [formItems, setFormItems] = useState<Record<string, number>>({})
   const [saving, setSaving] = useState(false)
 
@@ -69,7 +78,7 @@ export default function DayOrderPage() {
     const { data } = await supabase
       .from('orders')
       .select(`
-        id, customer_name, status, batch_info, payment_status,
+        id, customer_name, status, batch_info, printed, notes,
         packaging_style:packaging_styles(id, name),
         branding_style:branding_styles(id, name),
         order_items(quantity, product:products(id, name, category))
@@ -78,29 +87,23 @@ export default function DayOrderPage() {
       .order('created_at', { ascending: true })
 
     if (data) {
-      const rows: OrderRow[] = data.map((o: any) => {
-        const items: Record<string, number> = {}
-        let cakes = 0, cookies = 0
-        for (const item of (o.order_items || [])) {
-          if (item.product) {
-            items[item.product.name] = item.quantity
-            if (item.product.category === 'cake') cakes += item.quantity
-            if (item.product.category === 'cookie') cookies += item.quantity
-          }
-        }
-        return {
-          id: o.id,
-          customer_name: o.customer_name,
-          status: o.status,
-          batch_info: o.batch_info,
-          payment_status: o.payment_status,
-          packaging_style: o.packaging_style,
-          branding_style: o.branding_style,
-          items,
-          cake_boxes: Math.ceil(cakes / 2),
-          cookie_boxes: cookies,
-        }
-      })
+      const rows: OrderRow[] = data.map((o: any) => ({
+        id: o.id,
+        customer_name: o.customer_name,
+        status: o.status,
+        batch_info: o.batch_info,
+        printed: o.printed,
+        notes: o.notes,
+        packaging_style: o.packaging_style,
+        branding_style: o.branding_style,
+        items: (o.order_items || [])
+          .filter((i: any) => i.quantity > 0)
+          .map((i: any) => ({
+            name: i.product?.name || '',
+            category: i.product?.category || '',
+            quantity: i.quantity,
+          })),
+      }))
       setOrders(rows)
     }
     setLoading(false)
@@ -108,7 +111,6 @@ export default function DayOrderPage() {
 
   useEffect(() => {
     fetchOrders()
-    // Load reference data
     supabase.from('products').select('*').eq('is_active', true).order('sort_order').then(({ data }) => {
       if (data) setProducts(data)
     })
@@ -120,19 +122,30 @@ export default function DayOrderPage() {
     })
   }, [fetchOrders])
 
+  const resetForm = () => {
+    setFormName('')
+    setFormStatus('')
+    setFormBatch('')
+    setFormPackaging('')
+    setFormBranding('')
+    setFormNotes('')
+    setFormItems({})
+  }
+
   const handleAddOrder = async () => {
     if (!formName.trim()) return
     setSaving(true)
 
-    const { data: order, error } = await supabase
+    const { data: order } = await supabase
       .from('orders')
       .insert({
         order_date: dateStr,
         customer_name: formName.trim(),
-        status: formStatus,
+        status: formStatus || '待',
         batch_info: formBatch || null,
         packaging_id: formPackaging || null,
         branding_id: formBranding || null,
+        notes: formNotes || null,
       })
       .select('id')
       .single()
@@ -150,13 +163,7 @@ export default function DayOrderPage() {
       }
     }
 
-    // Reset form
-    setFormName('')
-    setFormStatus('待')
-    setFormBatch('')
-    setFormPackaging('')
-    setFormBranding('')
-    setFormItems({})
+    resetForm()
     setDialogOpen(false)
     setSaving(false)
     fetchOrders()
@@ -168,23 +175,46 @@ export default function DayOrderPage() {
     fetchOrders()
   }
 
-  const handlePaymentChange = async (orderId: string, status: string) => {
-    await supabase.from('orders').update({ payment_status: status }).eq('id', orderId)
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, payment_status: status } : o))
+  const handlePrintedToggle = async (orderId: string, printed: boolean) => {
+    await supabase.from('orders').update({ printed }).eq('id', orderId)
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, printed } : o))
   }
 
   const weekday = format(date, 'EEEE', { locale: zhTW })
   const dateDisplay = format(date, 'yyyy 年 M 月 d 日', { locale: zhTW })
-  const totalCakes = orders.reduce((s, o) => s + o.cake_boxes, 0)
-  const totalCookies = orders.reduce((s, o) => s + o.cookie_boxes, 0)
-  const pendingCount = orders.filter(o => ['待', '延'].includes(o.status)).length
-  const shippedCount = orders.filter(o => ['寄出', '自取', '送', '到', '取', '豐原'].includes(o.status)).length
 
+  // Group products by category for the form
   const cakeProducts = products.filter(p => p.category === 'cake')
+  const tubeProducts = products.filter(p => p.category === 'tube')
+  const singleCakeProducts = products.filter(p => p.category === 'single_cake')
   const cookieProducts = products.filter(p => p.category === 'cookie')
+
+  // Determine which categories have items in the form (for packaging/branding filtering)
+  const formHasCake = cakeProducts.some(p => (formItems[p.id] || 0) > 0)
+  const formHasTube = tubeProducts.some(p => (formItems[p.id] || 0) > 0)
+  const formHasSingle = singleCakeProducts.some(p => (formItems[p.id] || 0) > 0)
+
+  // Filter packaging based on what's in the order
+  const availablePackaging = packagingStyles.filter(ps => {
+    if (formHasCake && PACKAGING_CATEGORIES.cake?.includes(ps.name)) return true
+    if (formHasTube && PACKAGING_CATEGORIES.tube?.includes(ps.name)) return true
+    if (formHasSingle && PACKAGING_CATEGORIES.single_cake?.includes(ps.name)) return true
+    // If nothing selected yet, show all
+    if (!formHasCake && !formHasTube && !formHasSingle) return true
+    return false
+  })
+
+  // Summary stats
+  const totalOrders = orders.length
+  const cakeBoxes = orders.reduce((sum, o) => sum + o.items.filter(i => i.category === 'cake').reduce((s, i) => s + i.quantity, 0), 0)
+  const tubeCount = orders.reduce((sum, o) => sum + o.items.filter(i => i.category === 'tube').reduce((s, i) => s + i.quantity, 0), 0)
+  const singleCount = orders.reduce((sum, o) => sum + o.items.filter(i => i.category === 'single_cake').reduce((s, i) => s + i.quantity, 0), 0)
+  const cookieCount = orders.reduce((sum, o) => sum + o.items.filter(i => i.category === 'cookie').reduce((s, i) => s + i.quantity, 0), 0)
+  const printedCount = orders.filter(o => o.printed).length
 
   return (
     <div>
+      {/* Header */}
       <div className="mb-6">
         <div className="mb-2 flex items-center gap-2">
           <Button variant="ghost" size="icon" onClick={() => router.push('/calendar')}>
@@ -204,156 +234,63 @@ export default function DayOrderPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+        {/* Order table */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <CardTitle className="text-base">訂單列表 ({orders.length} 筆)</CardTitle>
-            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-              <Button size="sm" onClick={() => setDialogOpen(true)}>
-                <Plus className="mr-1 h-4 w-4" /> 新增訂單
-              </Button>
-              <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-                <DialogHeader>
-                  <DialogTitle>新增訂單 — {dateDisplay}</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4 pt-2">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label>客戶姓名 *</Label>
-                      <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="姓名" />
-                    </div>
-                    <div>
-                      <Label>狀態</Label>
-                      <Select value={formStatus} onValueChange={(v) => v && setFormStatus(v)}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {STATUS_OPTIONS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div>
-                    <Label>備註（分批/追加）</Label>
-                    <Input value={formBatch} onChange={e => setFormBatch(e.target.value)} placeholder="e.g. 分批2." />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label>包裝款式</Label>
-                      <Select value={formPackaging} onValueChange={(v) => v && setFormPackaging(v)}>
-                        <SelectTrigger><SelectValue placeholder="選擇" /></SelectTrigger>
-                        <SelectContent>
-                          {packagingStyles.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>烙印款式</Label>
-                      <Select value={formBranding} onValueChange={(v) => v && setFormBranding(v)}>
-                        <SelectTrigger><SelectValue placeholder="選擇" /></SelectTrigger>
-                        <SelectContent>
-                          {brandingStyles.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  {cakeProducts.length > 0 && (
-                    <div>
-                      <Label className="mb-2 block">🍰 蛋糕數量</Label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {cakeProducts.map(p => (
-                          <div key={p.id}>
-                            <Label className="text-xs">{p.name}</Label>
-                            <Input
-                              type="number" min={0}
-                              value={formItems[p.id] || ''}
-                              onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))}
-                              placeholder="0"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {cookieProducts.length > 0 && (
-                    <div>
-                      <Label className="mb-2 block">🍪 曲奇數量</Label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {cookieProducts.map(p => (
-                          <div key={p.id}>
-                            <Label className="text-xs">{p.name}</Label>
-                            <Input
-                              type="number" min={0}
-                              value={formItems[p.id] || ''}
-                              onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))}
-                              placeholder="0"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <Button className="w-full" onClick={handleAddOrder} disabled={saving || !formName.trim()}>
-                    {saving ? '儲存中...' : '新增訂單'}
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
+            <Button size="sm" onClick={() => setDialogOpen(true)}>
+              <Plus className="mr-1 h-4 w-4" /> 新增訂單
+            </Button>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-10">印</TableHead>
                     <TableHead className="w-16">狀態</TableHead>
                     <TableHead className="w-20">客戶</TableHead>
-                    {cakeProducts.map(p => (
-                      <TableHead key={p.id} className="w-14 text-center">{p.name}</TableHead>
-                    ))}
-                    <TableHead className="w-16 text-center">蛋糕盒</TableHead>
-                    <TableHead className="w-16 text-center">曲奇盒</TableHead>
+                    <TableHead>品項</TableHead>
                     <TableHead className="w-20">烙印</TableHead>
                     <TableHead className="w-20">包裝</TableHead>
-                    <TableHead className="w-24">付款</TableHead>
                     <TableHead className="w-10"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {orders.map((order) => {
-                    const paymentColor = PAYMENT_OPTIONS.find(p => p.value === order.payment_status)?.color || ''
-                    return (
-                      <TableRow key={order.id} className={paymentColor}>
-                        <TableCell>
-                          <Badge variant="outline" className="text-xs">{order.status}</Badge>
-                          {order.batch_info && <div className="mt-0.5 text-[10px] text-gray-500">{order.batch_info}</div>}
-                        </TableCell>
-                        <TableCell className="font-medium">{order.customer_name}</TableCell>
-                        {cakeProducts.map(p => (
-                          <TableCell key={p.id} className="text-center">{order.items[p.name] || '-'}</TableCell>
-                        ))}
-                        <TableCell className="text-center font-medium">{order.cake_boxes}</TableCell>
-                        <TableCell className="text-center font-medium">{order.cookie_boxes}</TableCell>
-                        <TableCell className="text-xs">{order.branding_style?.name || '-'}</TableCell>
-                        <TableCell className="text-xs">{order.packaging_style?.name || '-'}</TableCell>
-                        <TableCell>
-                          <Select value={order.payment_status} onValueChange={(v) => v && handlePaymentChange(order.id, v)}>
-                            <SelectTrigger className="h-7 text-xs w-24">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {PAYMENT_OPTIONS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-600" onClick={() => handleDelete(order.id)}>
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
+                  {orders.map((order) => (
+                    <TableRow key={order.id} className={order.printed ? 'bg-yellow-100' : ''}>
+                      <TableCell>
+                        <Checkbox
+                          checked={order.printed}
+                          onCheckedChange={(checked) => handlePrintedToggle(order.id, !!checked)}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs">{order.status}</span>
+                        {order.batch_info && <div className="text-[10px] text-gray-500">{order.batch_info}</div>}
+                      </TableCell>
+                      <TableCell className="font-medium">{order.customer_name}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {order.items.map((item, idx) => (
+                            <Badge key={idx} variant="secondary" className="text-[10px] px-1.5 py-0">
+                              {item.name.replace('旋轉筒-', '🫙').replace('單入-', '📦')} x{item.quantity}
+                            </Badge>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs">{order.branding_style?.name || '-'}</TableCell>
+                      <TableCell className="text-xs">{order.packaging_style?.name || '-'}</TableCell>
+                      <TableCell>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-600" onClick={() => handleDelete(order.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
                   {orders.length === 0 && !loading && (
                     <TableRow>
-                      <TableCell colSpan={10} className="py-8 text-center text-gray-400">
+                      <TableCell colSpan={7} className="py-8 text-center text-gray-400">
                         今天還沒有訂單，點擊「新增訂單」開始
                       </TableCell>
                     </TableRow>
@@ -364,30 +301,175 @@ export default function DayOrderPage() {
           </CardContent>
         </Card>
 
+        {/* Sidebar stats */}
         <div className="space-y-4">
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm">當日統計</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex justify-between text-sm"><span className="text-gray-500">訂單數</span><span className="font-medium">{orders.length} 筆</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-500">🍰 蛋糕盒數</span><span className="font-medium">{totalCakes}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-500">🍪 曲奇盒數</span><span className="font-medium">{totalCookies}</span></div>
+            <CardContent className="space-y-2">
+              <div className="flex justify-between text-sm"><span className="text-gray-500">訂單數</span><span className="font-medium">{totalOrders} 筆</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-500">🍰 蛋糕盒</span><span className="font-medium">{cakeBoxes}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-500">🫙 旋轉筒</span><span className="font-medium">{tubeCount}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-500">📦 單入蛋糕</span><span className="font-medium">{singleCount}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-500">🍪 曲奇</span><span className="font-medium">{cookieCount}</span></div>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">出貨狀態</CardTitle></CardHeader>
+            <CardHeader className="pb-2"><CardTitle className="text-sm">列印狀態</CardTitle></CardHeader>
             <CardContent className="space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <Badge variant="outline" className="border-green-300 text-green-700">已出貨</Badge>
-                <span>{shippedCount}</span>
+                <Badge variant="outline" className="border-yellow-400 text-yellow-700 bg-yellow-50">已列印</Badge>
+                <span>{printedCount}</span>
               </div>
               <div className="flex items-center justify-between text-sm">
-                <Badge variant="outline" className="border-orange-300 text-orange-700">待處理</Badge>
-                <span>{pendingCount}</span>
+                <Badge variant="outline" className="border-gray-300 text-gray-500">未列印</Badge>
+                <span>{totalOrders - printedCount}</span>
               </div>
             </CardContent>
           </Card>
         </div>
       </div>
+
+      {/* Add Order Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>新增訂單 — {dateDisplay}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            {/* Customer + Status */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>客戶姓名 *</Label>
+                <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="姓名" />
+              </div>
+              <div>
+                <Label>狀態</Label>
+                <Input value={formStatus} onChange={e => setFormStatus(e.target.value)} placeholder="自由輸入" />
+              </div>
+            </div>
+            <div>
+              <Label>備註（分批/追加）</Label>
+              <Input value={formBatch} onChange={e => setFormBatch(e.target.value)} placeholder="e.g. 分批2." />
+            </div>
+
+            {/* Cake combos */}
+            {cakeProducts.length > 0 && (
+              <div>
+                <Label className="mb-2 block">🍰 蜂蜜蛋糕（盒）</Label>
+                <div className="grid grid-cols-1 gap-2">
+                  {cakeProducts.map(p => (
+                    <div key={p.id} className="flex items-center gap-2">
+                      <span className="text-sm w-40 truncate">{p.name}</span>
+                      <Input
+                        type="number" min={0} className="w-20"
+                        value={formItems[p.id] || ''}
+                        onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))}
+                        placeholder="0"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Tube */}
+            {tubeProducts.length > 0 && (
+              <div>
+                <Label className="mb-2 block">🫙 旋轉筒</Label>
+                <div className="grid grid-cols-1 gap-2">
+                  {tubeProducts.map(p => (
+                    <div key={p.id} className="flex items-center gap-2">
+                      <span className="text-sm w-40 truncate">{p.name}</span>
+                      <Input
+                        type="number" min={0} className="w-20"
+                        value={formItems[p.id] || ''}
+                        onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))}
+                        placeholder="0"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Single cake */}
+            {singleCakeProducts.length > 0 && (
+              <div>
+                <Label className="mb-2 block">📦 單入蛋糕</Label>
+                <div className="grid grid-cols-1 gap-2">
+                  {singleCakeProducts.map(p => (
+                    <div key={p.id} className="flex items-center gap-2">
+                      <span className="text-sm w-40 truncate">{p.name}</span>
+                      <Input
+                        type="number" min={0} className="w-20"
+                        value={formItems[p.id] || ''}
+                        onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))}
+                        placeholder="0"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Cookie */}
+            {cookieProducts.length > 0 && (
+              <div>
+                <Label className="mb-2 block">🍪 曲奇</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {cookieProducts.map(p => (
+                    <div key={p.id} className="flex items-center gap-2">
+                      <span className="text-sm w-24 truncate">{p.name}</span>
+                      <Input
+                        type="number" min={0} className="w-20"
+                        value={formItems[p.id] || ''}
+                        onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))}
+                        placeholder="0"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Branding */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>烙印款式</Label>
+                <Select value={formBranding} onValueChange={(v) => v && setFormBranding(v)}>
+                  <SelectTrigger><SelectValue placeholder="選擇" /></SelectTrigger>
+                  <SelectContent>
+                    {brandingStyles.map(b => (
+                      <SelectItem
+                        key={b.id}
+                        value={b.id}
+                        disabled={b.name === '馬年限定' && !formHasCake}
+                      >
+                        {b.name}{b.name === '馬年限定' ? '（僅蛋糕）' : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>包裝款式</Label>
+                <Select value={formPackaging} onValueChange={(v) => v && setFormPackaging(v)}>
+                  <SelectTrigger><SelectValue placeholder="選擇" /></SelectTrigger>
+                  <SelectContent>
+                    {availablePackaging.map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <Button className="w-full" onClick={handleAddOrder} disabled={saving || !formName.trim()}>
+              {saving ? '儲存中...' : '新增訂單'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
