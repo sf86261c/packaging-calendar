@@ -550,9 +550,9 @@ export default function DayOrderPage() {
                   <div className="grid grid-cols-2 gap-2 pt-2 border-t mt-2">
                     <div>
                       <Label className="text-xs">烙印款式</Label>
-                      <Select value={formCakeBranding} onValueChange={(v) => v && setFormCakeBranding(v)}>
+                      <Select value={formCakeBranding || undefined} onValueChange={(v) => v && setFormCakeBranding(v)}>
                         <SelectTrigger className="h-8 text-xs">
-                          <SelectValue placeholder="選擇">{formCakeBranding ? brandName(formCakeBranding) : '選擇'}</SelectValue>
+                          <SelectValue placeholder="選擇">{formCakeBranding ? brandName(formCakeBranding) : undefined}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {brandingStyles.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
@@ -561,9 +561,9 @@ export default function DayOrderPage() {
                     </div>
                     <div>
                       <Label className="text-xs">包裝款式</Label>
-                      <Select value={formCakePackaging} onValueChange={(v) => v && setFormCakePackaging(v)}>
+                      <Select value={formCakePackaging || undefined} onValueChange={(v) => v && setFormCakePackaging(v)}>
                         <SelectTrigger className="h-8 text-xs">
-                          <SelectValue placeholder="選擇">{formCakePackaging ? pkgName(formCakePackaging) : '選擇'}</SelectValue>
+                          <SelectValue placeholder="選擇">{formCakePackaging ? pkgName(formCakePackaging) : undefined}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {cakePackagingOptions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
@@ -588,9 +588,9 @@ export default function DayOrderPage() {
                 {formHasTube && (
                   <div className="pt-2 border-t mt-2">
                     <Label className="text-xs">包裝款式</Label>
-                    <Select value={formTubePackaging} onValueChange={(v) => v && setFormTubePackaging(v)}>
+                    <Select value={formTubePackaging || undefined} onValueChange={(v) => v && setFormTubePackaging(v)}>
                       <SelectTrigger className="h-8 text-xs">
-                        <SelectValue placeholder="選擇">{formTubePackaging ? pkgName(formTubePackaging) : '選擇'}</SelectValue>
+                        <SelectValue placeholder="選擇">{formTubePackaging ? pkgName(formTubePackaging) : undefined}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {tubePackagingOptions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
@@ -619,9 +619,9 @@ export default function DayOrderPage() {
                     </div>
                     <div>
                       <Label className="text-xs">包裝款式</Label>
-                      <Select value={formSingleCakePackaging} onValueChange={(v) => v && setFormSingleCakePackaging(v)}>
+                      <Select value={formSingleCakePackaging || undefined} onValueChange={(v) => v && setFormSingleCakePackaging(v)}>
                         <SelectTrigger className="h-8 text-xs">
-                          <SelectValue placeholder="選擇">{formSingleCakePackaging ? pkgName(formSingleCakePackaging) : '選擇'}</SelectValue>
+                          <SelectValue placeholder="選擇">{formSingleCakePackaging ? pkgName(formSingleCakePackaging) : undefined}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {singleCakePackagingOptions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}

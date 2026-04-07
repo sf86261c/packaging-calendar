@@ -322,8 +322,12 @@ export default function MaterialsPage() {
           <div className="space-y-4 pt-2">
             <div>
               <Label>包材</Label>
-              <Select value={inboundMat} onValueChange={v => v && setInboundMat(v)}>
-                <SelectTrigger><SelectValue placeholder="選擇包材" /></SelectTrigger>
+              <Select value={inboundMat || undefined} onValueChange={v => v && setInboundMat(v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="選擇包材">
+                    {inboundMat ? activeMaterials.find(m => m.id === inboundMat)?.name : undefined}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {activeMaterials.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
                 </SelectContent>
@@ -351,8 +355,12 @@ export default function MaterialsPage() {
           <div className="space-y-4 pt-2">
             <div>
               <Label>產品</Label>
-              <Select value={usageProduct} onValueChange={v => v && setUsageProduct(v)}>
-                <SelectTrigger><SelectValue placeholder="選擇產品" /></SelectTrigger>
+              <Select value={usageProduct || undefined} onValueChange={v => v && setUsageProduct(v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="選擇產品">
+                    {usageProduct ? products.find(p => p.id === usageProduct)?.name : undefined}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                 </SelectContent>
@@ -360,8 +368,12 @@ export default function MaterialsPage() {
             </div>
             <div>
               <Label>包材</Label>
-              <Select value={usageMaterial} onValueChange={v => v && setUsageMaterial(v)}>
-                <SelectTrigger><SelectValue placeholder="選擇包材" /></SelectTrigger>
+              <Select value={usageMaterial || undefined} onValueChange={v => v && setUsageMaterial(v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="選擇包材">
+                    {usageMaterial ? (() => { const m = activeMaterials.find(x => x.id === usageMaterial); return m ? `${m.name} (${m.unit})` : undefined })() : undefined}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {activeMaterials.map(m => <SelectItem key={m.id} value={m.id}>{m.name} ({m.unit})</SelectItem>)}
                 </SelectContent>

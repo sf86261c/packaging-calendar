@@ -394,11 +394,13 @@ export default function SettingsPage() {
               <div className="space-y-1.5">
                 <Label>分類</Label>
                 <Select
-                  value={newProductCategory}
+                  value={newProductCategory || undefined}
                   onValueChange={(v) => v && setNewProductCategory(v)}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="選擇分類" />
+                    <SelectValue placeholder="選擇分類">
+                      {newProductCategory ? `${CATEGORY_ICONS[newProductCategory] || ''} ${CATEGORY_LABELS[newProductCategory] || newProductCategory}` : undefined}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {CATEGORY_OPTIONS.map((opt) => (

@@ -145,8 +145,12 @@ export default function InventoryPage() {
             <div className="space-y-4 pt-2">
               <div>
                 <Label>產品</Label>
-                <Select value={selectedProduct} onValueChange={(v) => v && setSelectedProduct(v)}>
-                  <SelectTrigger><SelectValue placeholder="選擇產品" /></SelectTrigger>
+                <Select value={selectedProduct || undefined} onValueChange={(v) => v && setSelectedProduct(v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="選擇產品">
+                      {selectedProduct ? products.find(p => p.id === selectedProduct)?.name : undefined}
+                    </SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
                     {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                   </SelectContent>
