@@ -1,4 +1,4 @@
-export type ProductCategory = 'cake' | 'cake_bar' | 'cookie' | 'tube' | 'single_cake' | 'pineapple'
+export type ProductCategory = 'cake' | 'cake_bar' | 'cookie' | 'tube' | 'single_cake'
 
 export type InventoryType = 'inbound' | 'outbound' | 'adjustment'
 
@@ -29,16 +29,21 @@ export interface Order {
   customer_name: string
   status: string
   batch_info: string | null
-  packaging_id: string | null
-  branding_id: string | null
   printed: boolean
-  notes: string | null
+  // Per-category packaging/branding
+  cake_packaging_id: string | null
+  cake_branding_id: string | null
+  tube_packaging_id: string | null
+  single_cake_packaging_id: string | null
+  single_cake_branding_text: string | null
   created_by: string | null
   created_at: string
   updated_at: string
   // Joined fields
-  packaging_style?: PackagingStyle
-  branding_style?: BrandingStyle
+  cake_packaging?: PackagingStyle
+  cake_branding?: BrandingStyle
+  tube_packaging?: PackagingStyle
+  single_cake_packaging?: PackagingStyle
   order_items?: OrderItem[]
 }
 
@@ -91,7 +96,6 @@ export interface ProductMaterialUsage {
   material?: PackagingMaterial
 }
 
-// View models for UI
 export interface DaySummary {
   date: string
   order_count: number
@@ -99,16 +103,4 @@ export interface DaySummary {
   cookie_total: number
   tube_total: number
   pending_count: number
-  shipped_count: number
-}
-
-export interface WeeklyStats {
-  week_number: number
-  week_start: string
-  week_end: string
-  cake_original: number
-  cake_black_tea: number
-  cake_jasmine: number
-  cookie_by_type: Record<string, number>
-  packaging_by_style: Record<string, number>
 }

@@ -66,6 +66,16 @@ export default function CalendarPage() {
       setLoading(false)
     }
     fetchData()
+
+    // Realtime: auto-refresh on order changes
+    const channel = supabase
+      .channel('calendar-orders')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        fetchData()
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
   }, [currentMonth])
 
   return (
@@ -107,7 +117,7 @@ export default function CalendarPage() {
             <div
               key={dateStr}
               onClick={() => router.push(`/calendar/${dateStr}`)}
-              className={`min-h-[100px] cursor-pointer rounded-lg border p-2 transition-colors hover:border-blue-300 hover:bg-blue-50/50 ${
+              className={`min-h-[60px] sm:min-h-[100px] cursor-pointer rounded-lg border p-1.5 sm:p-2 transition-colors hover:border-blue-300 hover:bg-blue-50/50 ${
                 today ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white'
               }`}
             >

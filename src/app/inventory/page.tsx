@@ -69,7 +69,19 @@ export default function InventoryPage() {
     setLoading(false)
   }
 
-  useEffect(() => { fetchInventory() }, [])
+  useEffect(() => {
+    fetchInventory()
+
+    // Realtime: auto-refresh on inventory changes
+    const channel = supabase
+      .channel('inventory-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => {
+        fetchInventory()
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [])
 
   const handleInbound = async () => {
     if (!selectedProduct || !inboundQty) return
