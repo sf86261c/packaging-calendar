@@ -32,7 +32,9 @@ export default function DashboardPage() {
         .from('orders')
         .select(`
           id, status, printed,
-          packaging_style:packaging_styles(name),
+          cake_pkg:packaging_styles!orders_cake_packaging_id_fkey(name),
+          tube_pkg:packaging_styles!orders_tube_packaging_id_fkey(name),
+          single_pkg:packaging_styles!orders_single_cake_packaging_id_fkey(name),
           order_items(quantity, product:products(name, category))
         `)
         .gte('order_date', ms)
@@ -46,8 +48,11 @@ export default function DashboardPage() {
         totalOrders = orders.length
         for (const o of orders as any[]) {
           if (!o.printed) pendingCount++
-          const pkgName = o.packaging_style?.name
-          if (pkgName) pkgMap[pkgName] = (pkgMap[pkgName] || 0) + 1
+          // Count all packaging types
+          for (const pkg of [o.cake_pkg, o.tube_pkg, o.single_pkg]) {
+            const name = (pkg as any)?.name
+            if (name) pkgMap[name] = (pkgMap[name] || 0) + 1
+          }
           for (const item of (o.order_items || [])) {
             const cat = item.product?.category
             const name = item.product?.name

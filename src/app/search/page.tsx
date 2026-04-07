@@ -14,7 +14,7 @@ interface SearchResult {
   order_date: string
   status: string
   printed: boolean
-  packaging_style: { name: string } | null
+  packaging_summary: string
   items_summary: string
 }
 
@@ -40,7 +40,9 @@ export default function SearchPage() {
       .from('orders')
       .select(`
         id, customer_name, order_date, status, printed,
-        packaging_style:packaging_styles(name),
+        cake_pkg:packaging_styles!orders_cake_packaging_id_fkey(name),
+        tube_pkg:packaging_styles!orders_tube_packaging_id_fkey(name),
+        single_pkg:packaging_styles!orders_single_cake_packaging_id_fkey(name),
         order_items(quantity, product:products(name))
       `)
       .ilike('customer_name', `%${q}%`)
@@ -53,13 +55,15 @@ export default function SearchPage() {
           .filter((i: any) => i.quantity > 0)
           .map((i: any) => `${i.product?.name || '?'} ×${i.quantity}`)
           .join(', ')
+        const pkgs = [o.cake_pkg, o.tube_pkg, o.single_pkg]
+          .map((p: any) => p?.name).filter(Boolean).join(', ')
         return {
           id: o.id,
           customer_name: o.customer_name,
           order_date: o.order_date,
           status: o.status,
           printed: o.printed,
-          packaging_style: o.packaging_style,
+          packaging_summary: pkgs || '未指定包裝',
           items_summary: items || '無品項',
         }
       })
@@ -98,7 +102,7 @@ export default function SearchPage() {
                   <div className="font-medium">{r.customer_name}</div>
                   <div className="text-sm text-gray-500">{r.order_date} · {r.items_summary}</div>
                   <div className="text-xs text-gray-400">
-                    {r.packaging_style?.name || '未指定包裝'}
+                    {r.packaging_summary}
                     {r.printed && ' · ✅ 已列印'}
                   </div>
                 </div>
