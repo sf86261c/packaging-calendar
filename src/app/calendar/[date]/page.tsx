@@ -432,20 +432,24 @@ export default function DayOrderPage() {
               </div>
             )}
 
-            {/* Branding */}
+            {/* Branding — only enabled when cake has quantities */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>烙印款式</Label>
-                <Select value={formBranding} onValueChange={(v) => v && setFormBranding(v)}>
-                  <SelectTrigger><SelectValue placeholder="選擇" /></SelectTrigger>
+                <Label>烙印款式 {!formHasCake && <span className="text-xs text-gray-400">（需選蛋糕）</span>}</Label>
+                <Select
+                  value={formBranding}
+                  onValueChange={(v) => v && setFormBranding(v)}
+                  disabled={!formHasCake}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="選擇">
+                      {formBranding ? brandingStyles.find(b => b.id === formBranding)?.name || '選擇' : '選擇'}
+                    </SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
                     {brandingStyles.map(b => (
-                      <SelectItem
-                        key={b.id}
-                        value={b.id}
-                        disabled={b.name === '馬年限定' && !formHasCake}
-                      >
-                        {b.name}{b.name === '馬年限定' ? '（僅蛋糕）' : ''}
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -454,7 +458,11 @@ export default function DayOrderPage() {
               <div>
                 <Label>包裝款式</Label>
                 <Select value={formPackaging} onValueChange={(v) => v && setFormPackaging(v)}>
-                  <SelectTrigger><SelectValue placeholder="選擇" /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue placeholder="選擇">
+                      {formPackaging ? packagingStyles.find(p => p.id === formPackaging)?.name || '選擇' : '選擇'}
+                    </SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
                     {availablePackaging.map(p => (
                       <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
