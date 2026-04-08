@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { format } from 'date-fns'
-import { Loader2, Plus, Package, Settings, AlertTriangle, CalendarDays } from 'lucide-react'
+import { Loader2, Plus, Package, Settings, AlertTriangle, CalendarDays, Pencil, Trash2, Ban } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -61,6 +61,13 @@ export default function MaterialsPage() {
   const [usageProduct, setUsageProduct] = useState('')
   const [usageMaterial, setUsageMaterial] = useState('')
   const [usageQty, setUsageQty] = useState('1')
+
+  // Edit material dialog
+  const [editOpen, setEditOpen] = useState(false)
+  const [editId, setEditId] = useState('')
+  const [editName, setEditName] = useState('')
+  const [editUnit, setEditUnit] = useState('')
+  const [editSafety, setEditSafety] = useState('')
 
   // Date picker for historical inventory
   const [asOfDate, setAsOfDate] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -158,6 +165,36 @@ export default function MaterialsPage() {
     fetchData()
   }
 
+  const openEditDialog = (m: Material) => {
+    setEditId(m.id)
+    setEditName(m.name)
+    setEditUnit(m.unit)
+    setEditSafety(String(m.safety_stock))
+    setEditOpen(true)
+  }
+
+  const handleEditMaterial = async () => {
+    if (!editName.trim()) return
+    setSaving(true)
+    await supabase.from('packaging_materials').update({
+      name: editName.trim(),
+      unit: editUnit,
+      safety_stock: parseInt(editSafety) || 0,
+    }).eq('id', editId)
+    setEditOpen(false)
+    setSaving(false)
+    fetchData()
+  }
+
+  const handleDeleteMaterial = async (id: string, name: string) => {
+    if (!confirm(`確定要刪除「${name}」？相關庫存記錄和用量對照也會一併刪除。`)) return
+    // Delete related records first to avoid FK constraint errors
+    await supabase.from('packaging_material_inventory').delete().eq('material_id', id)
+    await supabase.from('product_material_usage').delete().eq('material_id', id)
+    await supabase.from('packaging_materials').delete().eq('id', id)
+    fetchData()
+  }
+
   const activeMaterials = materials.filter(m => m.is_active)
   const lowStockCount = activeMaterials.filter(m => m.stock < m.safety_stock).length
 
@@ -224,7 +261,18 @@ export default function MaterialsPage() {
                 <CardContent className="pt-4">
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{m.name}</span>
-                    {isLow && <Badge variant="destructive" className="text-xs">低庫存</Badge>}
+                    <div className="flex items-center gap-1">
+                      {isLow && <Badge variant="destructive" className="text-xs">低庫存</Badge>}
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-blue-600" onClick={() => openEditDialog(m)}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-orange-600" onClick={() => handleToggleActive(m.id, m.is_active)} title="停用">
+                        <Ban className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-red-600" onClick={() => handleDeleteMaterial(m.id, m.name)} title="刪除">
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
                   </div>
                   <div className={`mt-2 text-3xl font-bold ${isLow ? 'text-red-600' : ''}`}>
                     {m.stock.toLocaleString()}
@@ -290,10 +338,16 @@ export default function MaterialsPage() {
           <CardContent>
             <div className="flex flex-wrap gap-2">
               {materials.filter(m => !m.is_active).map(m => (
-                <Badge key={m.id} variant="outline" className="text-gray-400 line-through cursor-pointer"
-                  onClick={() => handleToggleActive(m.id, m.is_active)}>
-                  {m.name} (點擊啟用)
-                </Badge>
+                <div key={m.id} className="flex items-center gap-1">
+                  <Badge variant="outline" className="text-gray-400 line-through cursor-pointer"
+                    onClick={() => handleToggleActive(m.id, m.is_active)}>
+                    {m.name} (點擊啟用)
+                  </Badge>
+                  <Button variant="ghost" size="icon" className="h-5 w-5 text-gray-300 hover:text-red-500"
+                    onClick={() => handleDeleteMaterial(m.id, m.name)}>
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
               ))}
             </div>
           </CardContent>
@@ -364,6 +418,42 @@ export default function MaterialsPage() {
             </div>
             <Button className="w-full" onClick={handleInbound} disabled={saving || !inboundMat || !inboundQty}>
               {saving ? '儲存中...' : '確認入庫'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Material Dialog ── */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>編輯包材品項</DialogTitle></DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div>
+              <Label>名稱 *</Label>
+              <Input value={editName} onChange={e => setEditName(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>單位</Label>
+                <Select value={editUnit} onValueChange={v => v && setEditUnit(v)}>
+                  <SelectTrigger><SelectValue>{editUnit}</SelectValue></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="個">個</SelectItem>
+                    <SelectItem value="張">張</SelectItem>
+                    <SelectItem value="條">條</SelectItem>
+                    <SelectItem value="捲">捲</SelectItem>
+                    <SelectItem value="包">包</SelectItem>
+                    <SelectItem value="箱">箱</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>安全庫存</Label>
+                <Input type="number" min={0} value={editSafety} onChange={e => setEditSafety(e.target.value)} />
+              </div>
+            </div>
+            <Button className="w-full" onClick={handleEditMaterial} disabled={saving || !editName.trim()}>
+              {saving ? '儲存中...' : '儲存變更'}
             </Button>
           </div>
         </DialogContent>
