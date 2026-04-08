@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { Loader2, Plus } from 'lucide-react'
+import { format } from 'date-fns'
+import { Loader2, Plus, CalendarDays } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -37,8 +38,9 @@ export default function InventoryPage() {
   const [inboundQty, setInboundQty] = useState('')
   const [inboundNote, setInboundNote] = useState('')
   const [saving, setSaving] = useState(false)
+  const [asOfDate, setAsOfDate] = useState(format(new Date(), 'yyyy-MM-dd'))
 
-  const fetchInventory = async () => {
+  const fetchInventory = useCallback(async () => {
     setLoading(true)
     const { data: prods } = await supabase
       .from('products')
@@ -47,10 +49,15 @@ export default function InventoryPage() {
       .order('sort_order')
 
     if (prods) {
-      // Get inventory totals per product
-      const { data: invData } = await supabase
+      // Get inventory totals per product, filtered by date
+      let query = supabase
         .from('inventory')
         .select('product_id, quantity')
+
+      // Filter: only include records up to the selected date
+      query = query.lte('created_at', `${asOfDate}T23:59:59.999Z`)
+
+      const { data: invData } = await query
 
       const stockMap: Record<string, number> = {}
       if (invData) {
@@ -67,12 +74,11 @@ export default function InventoryPage() {
       })))
     }
     setLoading(false)
-  }
+  }, [asOfDate])
 
   useEffect(() => {
     fetchInventory()
 
-    // Realtime: auto-refresh on inventory changes
     const channel = supabase
       .channel('inventory-updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => {
@@ -81,7 +87,7 @@ export default function InventoryPage() {
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [])
+  }, [fetchInventory])
 
   const handleInbound = async () => {
     if (!selectedProduct || !inboundQty) return
@@ -99,6 +105,8 @@ export default function InventoryPage() {
     setSaving(false)
     fetchInventory()
   }
+
+  const isToday = asOfDate === format(new Date(), 'yyyy-MM-dd')
 
   const cakes = products.filter(p => p.category === 'cake_bar')
   const cookies = products.filter(p => p.category === 'cookie')
@@ -131,64 +139,81 @@ export default function InventoryPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-bold text-gray-900">📦 產品庫存</h1>
+          <h1 className="text-2xl font-bold text-gray-900">產品庫存</h1>
           {loading && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
+          {!isToday && <Badge variant="outline" className="text-xs">歷史庫存</Badge>}
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <Button size="sm" onClick={() => setDialogOpen(true)}>
-            <Plus className="mr-1 h-4 w-4" /> 入庫
-          </Button>
-          <DialogContent>
-            <DialogHeader><DialogTitle>產品入庫</DialogTitle></DialogHeader>
-            <div className="space-y-4 pt-2">
-              <div>
-                <Label>產品</Label>
-                <Select value={selectedProduct || undefined} onValueChange={(v) => v && setSelectedProduct(v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="選擇產品">
-                      {selectedProduct ? products.find(p => p.id === selectedProduct)?.name : undefined}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>入庫數量</Label>
-                <Input type="number" min={1} value={inboundQty} onChange={e => setInboundQty(e.target.value)} placeholder="數量" />
-              </div>
-              <div>
-                <Label>備註</Label>
-                <Input value={inboundNote} onChange={e => setInboundNote(e.target.value)} placeholder="選填" />
-              </div>
-              <Button className="w-full" onClick={handleInbound} disabled={saving || !selectedProduct || !inboundQty}>
-                {saving ? '儲存中...' : '確認入庫'}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <CalendarDays className="h-4 w-4 text-gray-400" />
+            <Input
+              type="date"
+              value={asOfDate}
+              onChange={e => setAsOfDate(e.target.value)}
+              className="h-8 w-36 text-sm"
+            />
+            {!isToday && (
+              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setAsOfDate(format(new Date(), 'yyyy-MM-dd'))}>
+                今天
               </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+            )}
+          </div>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <Button size="sm" onClick={() => setDialogOpen(true)}>
+              <Plus className="mr-1 h-4 w-4" /> 入庫
+            </Button>
+            <DialogContent>
+              <DialogHeader><DialogTitle>產品入庫</DialogTitle></DialogHeader>
+              <div className="space-y-4 pt-2">
+                <div>
+                  <Label>產品</Label>
+                  <Select value={selectedProduct || undefined} onValueChange={(v) => v && setSelectedProduct(v)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="選擇產品">
+                        {selectedProduct ? products.find(p => p.id === selectedProduct)?.name : undefined}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>入庫數量</Label>
+                  <Input type="number" min={1} value={inboundQty} onChange={e => setInboundQty(e.target.value)} placeholder="數量" />
+                </div>
+                <div>
+                  <Label>備註</Label>
+                  <Input value={inboundNote} onChange={e => setInboundNote(e.target.value)} placeholder="選填" />
+                </div>
+                <Button className="w-full" onClick={handleInbound} disabled={saving || !selectedProduct || !inboundQty}>
+                  {saving ? '儲存中...' : '確認入庫'}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {cakes.length > 0 && (
         <div className="mb-6">
-          <h2 className="mb-3 text-lg font-semibold">🍰 蜂蜜蛋糕（條）</h2>
+          <h2 className="mb-3 text-lg font-semibold">蜂蜜蛋糕（條）</h2>
           <div className="grid gap-3 sm:grid-cols-3">{cakes.map(renderCard)}</div>
         </div>
       )}
 
       {cookies.length > 0 && (
         <div className="mb-6">
-          <h2 className="mb-3 text-lg font-semibold">🍪 曲奇</h2>
+          <h2 className="mb-3 text-lg font-semibold">曲奇</h2>
           <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">{cookies.map(renderCard)}</div>
         </div>
       )}
 
       {tubes.length > 0 && (
         <div className="mb-6">
-          <h2 className="mb-3 text-lg font-semibold">🫙 圓筒</h2>
+          <h2 className="mb-3 text-lg font-semibold">旋轉筒</h2>
           <div className="grid gap-3 sm:grid-cols-3">{tubes.map(renderCard)}</div>
         </div>
       )}

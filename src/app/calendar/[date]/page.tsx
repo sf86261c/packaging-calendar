@@ -24,7 +24,7 @@ import {
 
 const PACKAGING_CATEGORIES: Record<string, string[]> = {
   cake: ['祝福緞帶(米)', '森林旋律(粉)', '歡樂派對(藍)'],
-  tube: ['四季童話', '銀河探險', '旋轉木馬'],
+  tube: ['四季童話', '銀河探險', '馬戲團'],
   single_cake: ['愛心', '花園', '小熊'],
 }
 

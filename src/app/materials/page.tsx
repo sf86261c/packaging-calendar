@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { Loader2, Plus, Package, Settings, AlertTriangle } from 'lucide-react'
+import { format } from 'date-fns'
+import { Loader2, Plus, Package, Settings, AlertTriangle, CalendarDays } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -61,12 +62,15 @@ export default function MaterialsPage() {
   const [usageMaterial, setUsageMaterial] = useState('')
   const [usageQty, setUsageQty] = useState('1')
 
+  // Date picker for historical inventory
+  const [asOfDate, setAsOfDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+
   const fetchData = useCallback(async () => {
     setLoading(true)
 
     const [matRes, invRes, usageRes, prodRes] = await Promise.all([
       supabase.from('packaging_materials').select('*').order('name'),
-      supabase.from('packaging_material_inventory').select('material_id, quantity'),
+      supabase.from('packaging_material_inventory').select('material_id, quantity').lte('created_at', `${asOfDate}T23:59:59.999Z`),
       supabase.from('product_material_usage').select('id, product_id, material_id, quantity_per_unit, product:products(name)'),
       supabase.from('products').select('id, name, category').eq('is_active', true).order('sort_order'),
     ])
@@ -97,7 +101,7 @@ export default function MaterialsPage() {
 
     if (prodRes.data) setProducts(prodRes.data)
     setLoading(false)
-  }, [])
+  }, [asOfDate])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -159,26 +163,43 @@ export default function MaterialsPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-bold text-gray-900">包材庫存</h1>
-          {loading && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
-          {lowStockCount > 0 && (
-            <Badge variant="destructive" className="text-xs">
-              <AlertTriangle className="mr-1 h-3 w-3" /> {lowStockCount} 項低庫存
-            </Badge>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setUsageOpen(true)}>
-            <Settings className="mr-1 h-4 w-4" /> 用量對照
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setInboundOpen(true)}>
-            <Package className="mr-1 h-4 w-4" /> 入庫
-          </Button>
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="mr-1 h-4 w-4" /> 新增包材
-          </Button>
+      <div className="mb-6 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900">包材庫存</h1>
+            {loading && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
+            {lowStockCount > 0 && (
+              <Badge variant="destructive" className="text-xs">
+                <AlertTriangle className="mr-1 h-3 w-3" /> {lowStockCount} 項低庫存
+              </Badge>
+            )}
+            {asOfDate !== format(new Date(), 'yyyy-MM-dd') && <Badge variant="outline" className="text-xs">歷史庫存</Badge>}
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <CalendarDays className="h-4 w-4 text-gray-400" />
+              <Input
+                type="date"
+                value={asOfDate}
+                onChange={e => setAsOfDate(e.target.value)}
+                className="h-8 w-36 text-sm"
+              />
+              {asOfDate !== format(new Date(), 'yyyy-MM-dd') && (
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setAsOfDate(format(new Date(), 'yyyy-MM-dd'))}>
+                  今天
+                </Button>
+              )}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setUsageOpen(true)}>
+              <Settings className="mr-1 h-4 w-4" /> 用量對照
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setInboundOpen(true)}>
+              <Package className="mr-1 h-4 w-4" /> 入庫
+            </Button>
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="mr-1 h-4 w-4" /> 新增包材
+            </Button>
+          </div>
         </div>
       </div>
 
