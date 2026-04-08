@@ -1,4 +1,4 @@
-export type ProductCategory = 'cake' | 'cake_bar' | 'cookie' | 'tube' | 'single_cake'
+export type ProductCategory = 'cake' | 'cake_bar' | 'cookie' | 'tube' | 'tube_pkg' | 'single_cake'
 
 export type InventoryType = 'inbound' | 'outbound' | 'adjustment'
 

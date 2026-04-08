@@ -26,7 +26,7 @@ interface ProductStock {
 const SAFETY_STOCK: Record<string, number> = {
   cake_bar: 2000,
   cookie: 200,
-  tube: 100,
+  tube_pkg: 100,
 }
 
 export default function InventoryPage() {
@@ -110,7 +110,7 @@ export default function InventoryPage() {
 
   const cakes = products.filter(p => p.category === 'cake_bar')
   const cookies = products.filter(p => p.category === 'cookie')
-  const tubes = products.filter(p => p.category === 'tube')
+  const tubePkgs = products.filter(p => p.category === 'tube_pkg')
 
   const renderCard = (p: ProductStock) => {
     const safety = SAFETY_STOCK[p.category] || 100
@@ -211,10 +211,10 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {tubes.length > 0 && (
+      {tubePkgs.length > 0 && (
         <div className="mb-6">
-          <h2 className="mb-3 text-lg font-semibold">旋轉筒</h2>
-          <div className="grid gap-3 sm:grid-cols-3">{tubes.map(renderCard)}</div>
+          <h2 className="mb-3 text-lg font-semibold">旋轉筒包裝</h2>
+          <div className="grid gap-3 sm:grid-cols-3">{tubePkgs.map(renderCard)}</div>
         </div>
       )}
     </div>

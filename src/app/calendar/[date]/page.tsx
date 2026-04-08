@@ -205,29 +205,55 @@ export default function DayOrderPage() {
 
   // ─── Inventory deduction ────────────────────────────
 
-  const calculateDeductions = (itemEntries: [string, number][]) => {
+  const calculateDeductions = (itemEntries: [string, number][], tubePackagingId?: string) => {
     const cakeBarProducts = products.filter(p => p.category === 'cake_bar')
+    const tubePkgProducts = products.filter(p => p.category === 'tube_pkg')
     const deductions: Record<string, number> = {}
+
+    let totalTubes = 0
 
     for (const [productId, qty] of itemEntries) {
       if (qty <= 0) continue
       const product = products.find((p: any) => p.id === productId)
       if (!product) continue
 
-      let barPerUnit = 0
-      if (product.category === 'cake') barPerUnit = 1
-      else if (product.category === 'tube') barPerUnit = 1
-      else if (product.category === 'single_cake') barPerUnit = 0.25
-      else continue
+      // cake_bar deduction (cake boxes and single cakes consume cake bars)
+      if (product.category === 'cake' || product.category === 'single_cake') {
+        const barPerUnit = product.category === 'cake' ? 1 : 0.25
+        const flavors = extractFlavors(product.name, product.category)
+        for (const flavor of flavors) {
+          const bar = cakeBarProducts.find((b: any) => b.name.includes(flavor))
+          if (bar) {
+            deductions[bar.id] = (deductions[bar.id] || 0) + qty * barPerUnit
+          }
+        }
+      }
 
-      const flavors = extractFlavors(product.name, product.category)
-      for (const flavor of flavors) {
-        const bar = cakeBarProducts.find((b: any) => b.name.includes(flavor))
-        if (bar) {
-          deductions[bar.id] = (deductions[bar.id] || 0) + qty * barPerUnit
+      // Count total tubes for packaging deduction
+      if (product.category === 'tube') {
+        totalTubes += qty
+        // Also deduct cake_bar for tubes (1 bar per tube)
+        const flavors = extractFlavors(product.name, product.category)
+        for (const flavor of flavors) {
+          const bar = cakeBarProducts.find((b: any) => b.name.includes(flavor))
+          if (bar) {
+            deductions[bar.id] = (deductions[bar.id] || 0) + qty
+          }
         }
       }
     }
+
+    // Tube packaging deduction: deduct from tube_pkg product matching the selected style
+    if (tubePackagingId && totalTubes > 0) {
+      const pkgStyleName = packagingStyles.find(ps => ps.id === tubePackagingId)?.name
+      if (pkgStyleName) {
+        const tubePkg = tubePkgProducts.find(p => p.name === pkgStyleName)
+        if (tubePkg) {
+          deductions[tubePkg.id] = (deductions[tubePkg.id] || 0) + totalTubes
+        }
+      }
+    }
+
     return deductions
   }
 
@@ -289,7 +315,7 @@ export default function DayOrderPage() {
         await supabase.from('order_items').insert(buildItemRows(editingOrderId))
       }
       await reverseDeductions(editingOrderId)
-      const deductions = calculateDeductions(itemEntries)
+      const deductions = calculateDeductions(itemEntries, formTubePackaging || undefined)
       await applyDeductions(editingOrderId, deductions)
     } else {
       // ── Add mode ──
@@ -303,7 +329,7 @@ export default function DayOrderPage() {
         if (itemEntries.length > 0) {
           await supabase.from('order_items').insert(buildItemRows(order.id))
         }
-        const deductions = calculateDeductions(itemEntries)
+        const deductions = calculateDeductions(itemEntries, formTubePackaging || undefined)
         await applyDeductions(order.id, deductions)
       }
     }
