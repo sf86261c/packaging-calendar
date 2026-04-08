@@ -53,7 +53,7 @@ interface OrderRow {
   cake_branding?: { id: string; name: string } | null
   tube_packaging?: { id: string; name: string } | null
   single_cake_packaging?: { id: string; name: string } | null
-  items: { productId: string; name: string; category: string; quantity: number }[]
+  items: { productId: string; name: string; category: string; quantity: number; packagingId?: string | null }[]
 }
 
 export default function DayOrderPage() {
@@ -79,7 +79,7 @@ export default function DayOrderPage() {
   const [formCakePackaging, setFormCakePackaging] = useState('')
   const [formCakeBranding, setFormCakeBranding] = useState('')
   const [formTubePackaging, setFormTubePackaging] = useState('')
-  const [formSingleCakePackaging, setFormSingleCakePackaging] = useState('')
+  const [formSingleCakePackaging, setFormSingleCakePackaging] = useState<Record<string, string>>({})
   const [formSingleCakeBranding, setFormSingleCakeBranding] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -94,7 +94,7 @@ export default function DayOrderPage() {
         cake_branding:branding_styles!orders_cake_branding_id_fkey(id, name),
         tube_packaging:packaging_styles!orders_tube_packaging_id_fkey(id, name),
         single_cake_packaging:packaging_styles!orders_single_cake_packaging_id_fkey(id, name),
-        order_items(quantity, product:products(id, name, category))
+        order_items(quantity, packaging_id, product:products(id, name, category))
       `)
       .eq('order_date', dateStr)
       .order('created_at', { ascending: true })
@@ -122,6 +122,7 @@ export default function DayOrderPage() {
             name: i.product?.name || '',
             category: i.product?.category || '',
             quantity: i.quantity,
+            packagingId: i.packaging_id || null,
           })),
       }))
       setOrders(rows)
@@ -162,7 +163,7 @@ export default function DayOrderPage() {
     setFormItems({})
     setFormCakePackaging(''); setFormCakeBranding('')
     setFormTubePackaging('')
-    setFormSingleCakePackaging(''); setFormSingleCakeBranding('')
+    setFormSingleCakePackaging({}); setFormSingleCakeBranding('')
     setEditingOrderId(null)
   }
 
@@ -182,7 +183,22 @@ export default function DayOrderPage() {
     setFormCakePackaging(order.cake_packaging_id || '')
     setFormCakeBranding(order.cake_branding_id || '')
     setFormTubePackaging(order.tube_packaging_id || '')
-    setFormSingleCakePackaging(order.single_cake_packaging_id || '')
+    // Load per-item packaging for single cakes
+    const singlePkgMap: Record<string, string> = {}
+    for (const item of order.items) {
+      if (item.category === 'single_cake' && item.packagingId) {
+        singlePkgMap[item.productId] = item.packagingId
+      }
+    }
+    // Fallback: if no per-item packaging, try legacy single_cake_packaging_id
+    if (Object.keys(singlePkgMap).length === 0 && order.single_cake_packaging_id) {
+      for (const item of order.items) {
+        if (item.category === 'single_cake') {
+          singlePkgMap[item.productId] = order.single_cake_packaging_id!
+        }
+      }
+    }
+    setFormSingleCakePackaging(singlePkgMap)
     setFormSingleCakeBranding(order.single_cake_branding_text || '')
     setDialogOpen(true)
   }
@@ -247,24 +263,30 @@ export default function DayOrderPage() {
       cake_packaging_id: formCakePackaging || null,
       cake_branding_id: formCakeBranding || null,
       tube_packaging_id: formTubePackaging || null,
-      single_cake_packaging_id: formSingleCakePackaging || null,
+      single_cake_packaging_id: null, // per-item packaging now stored in order_items
       single_cake_branding_text: formSingleCakeBranding || null,
     }
 
     const itemEntries = Object.entries(formItems).filter(([, qty]) => qty > 0)
+
+    // Helper: build order_items rows with per-item packaging
+    const buildItemRows = (orderId: string) =>
+      itemEntries.map(([productId, quantity]) => {
+        const product = products.find((p: any) => p.id === productId)
+        return {
+          order_id: orderId,
+          product_id: productId,
+          quantity,
+          packaging_id: product?.category === 'single_cake' ? (formSingleCakePackaging[productId] || null) : null,
+        }
+      })
 
     if (editingOrderId) {
       // ── Edit mode ──
       await supabase.from('orders').update(orderData).eq('id', editingOrderId)
       await supabase.from('order_items').delete().eq('order_id', editingOrderId)
       if (itemEntries.length > 0) {
-        await supabase.from('order_items').insert(
-          itemEntries.map(([productId, quantity]) => ({
-            order_id: editingOrderId,
-            product_id: productId,
-            quantity,
-          }))
-        )
+        await supabase.from('order_items').insert(buildItemRows(editingOrderId))
       }
       await reverseDeductions(editingOrderId)
       const deductions = calculateDeductions(itemEntries)
@@ -279,13 +301,7 @@ export default function DayOrderPage() {
 
       if (order) {
         if (itemEntries.length > 0) {
-          await supabase.from('order_items').insert(
-            itemEntries.map(([productId, quantity]) => ({
-              order_id: order.id,
-              product_id: productId,
-              quantity,
-            }))
-          )
+          await supabase.from('order_items').insert(buildItemRows(order.id))
         }
         const deductions = calculateDeductions(itemEntries)
         await applyDeductions(order.id, deductions)
@@ -375,7 +391,16 @@ export default function DayOrderPage() {
     if (o.cake_packaging?.name) parts.push(`🍰${o.cake_packaging.name}`)
     if (o.cake_branding?.name) parts.push(`烙:${o.cake_branding.name}`)
     if (o.tube_packaging?.name) parts.push(`🫙${o.tube_packaging.name}`)
-    if (o.single_cake_packaging?.name) parts.push(`📦${o.single_cake_packaging.name}`)
+    // Per-item single cake packaging
+    const singlePkgs = o.items
+      .filter(i => i.category === 'single_cake' && i.packagingId)
+      .map(i => pkgName(i.packagingId!))
+    const uniqueSinglePkgs = [...new Set(singlePkgs)]
+    if (uniqueSinglePkgs.length > 0) {
+      parts.push(`📦${uniqueSinglePkgs.join('/')}`)
+    } else if (o.single_cake_packaging?.name) {
+      parts.push(`📦${o.single_cake_packaging.name}`)
+    }
     if (o.single_cake_branding_text) parts.push(`字:${o.single_cake_branding_text}`)
     return parts
   }
@@ -612,22 +637,29 @@ export default function DayOrderPage() {
                   </div>
                 ))}
                 {formHasSingle && (
-                  <div className="grid grid-cols-2 gap-2 pt-2 border-t mt-2">
+                  <div className="space-y-2 pt-2 border-t mt-2">
                     <div>
                       <Label className="text-xs">烙印文字</Label>
                       <Input className="h-8 text-xs" value={formSingleCakeBranding} onChange={e => setFormSingleCakeBranding(e.target.value)} placeholder="自由輸入" />
                     </div>
-                    <div>
-                      <Label className="text-xs">包裝款式</Label>
-                      <Select value={formSingleCakePackaging || undefined} onValueChange={(v) => v && setFormSingleCakePackaging(v)}>
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue placeholder="選擇">{formSingleCakePackaging ? pkgName(formSingleCakePackaging) : undefined}</SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {singleCakePackagingOptions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    {singleCakeProducts.filter(p => (formItems[p.id] || 0) > 0).map(p => (
+                      <div key={p.id}>
+                        <Label className="text-xs">{p.name} 包裝款式</Label>
+                        <Select
+                          value={formSingleCakePackaging[p.id] || undefined}
+                          onValueChange={(v) => v && setFormSingleCakePackaging(prev => ({ ...prev, [p.id]: v }))}
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder="選擇">
+                              {formSingleCakePackaging[p.id] ? pkgName(formSingleCakePackaging[p.id]) : undefined}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {singleCakePackagingOptions.map(ps => <SelectItem key={ps.id} value={ps.id}>{ps.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
