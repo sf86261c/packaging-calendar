@@ -13,27 +13,27 @@
 | 層級 | 技術 |
 |------|------|
 | 前端 | Next.js 16 (App Router) + TypeScript |
-| UI | Tailwind CSS 4 + shadcn/ui |
+| UI | Tailwind CSS 4 + shadcn/ui (@base-ui/react) |
 | 資料庫 | Supabase (PostgreSQL) + RLS |
 | 認證 | Supabase Auth (email/password) |
 | 部署 | Vercel (Hobby plan, 自動 CI/CD) |
-| 圖表 | Recharts 3.8（已整合） |
+| 圖表 | Recharts 3.8 |
 | 即時同步 | Supabase Realtime |
 
 ## 功能清單
 
-### 頁面
+### 頁面總覽
 
 | 頁面 | 路由 | 狀態 | 說明 |
 |------|------|------|------|
-| 登入/註冊 | `/login` | ✅ 完成 | Supabase Auth，支援 email/password |
-| 月曆視圖 | `/calendar` | ✅ 完成 | 月份切換、每日訂單摘要、Realtime 同步 |
-| 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除訂單、庫存自動扣減、CSV匯出、Realtime |
+| 登入/註冊 | `/login` | ✅ 完成 | Supabase Auth，email/password |
+| 月曆視圖 | `/calendar` | ✅ 完成 | 月份切換、每日訂單摘要、Realtime、響應式 |
+| 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除、庫存扣減、CSV匯出、Realtime |
 | 客戶搜尋 | `/search` | ✅ 完成 | 即時搜尋(ilike)、點擊跳轉日期頁 |
-| 統計儀表板 | `/dashboard` | ✅ 完成 | Recharts 長條圖/圓餅圖/折線圖/面積圖 |
-| 產品庫存 | `/inventory` | ✅ 完成 | 蛋糕(條)/曲奇/圓筒庫存量、入庫、Realtime |
-| 包材庫存 | `/materials` | ✅ 完成 | 包材 CRUD、入庫、產品用量對照表 |
-| 設定 | `/settings` | ✅ 完成 | 產品/包裝/烙印的新增、編輯、停用 CRUD |
+| 統計儀表板 | `/dashboard` | ✅ 完成 | 5 統計卡片 + 4 Recharts 圖表 |
+| 產品庫存 | `/inventory` | ✅ 完成 | 蛋糕條/曲奇/旋轉筒包裝庫存、日期查詢、Realtime |
+| 包材庫存 | `/materials` | ✅ 完成 | 包材 CRUD、編輯/刪除、入庫、階層式用量對照、日期查詢 |
+| 設定 | `/settings` | ✅ 完成 | 產品/包裝/烙印 CRUD（新增/行內編輯/停用） |
 
 ### 產品結構
 
@@ -42,56 +42,86 @@
 | 蜂蜜蛋糕（盒） | `cake` | 經典原味+伯爵紅茶、經典原味+茉莉花茶、伯爵紅茶+茉莉花茶 | 1盒 = 2條 cake_bar |
 | 蛋糕原料（條） | `cake_bar` | 經典原味（條）、伯爵紅茶（條）、茉莉花茶（條） | 庫存追蹤單位 |
 | 旋轉筒 | `tube` | 旋轉筒-經典原味、旋轉筒-伯爵紅茶、旋轉筒-茉莉花茶 | 1筒 = 1條 cake_bar |
+| 旋轉筒包裝 | `tube_pkg` | 四季童話、銀河探險、馬戲團 | 包裝容器庫存追蹤 |
 | 單入蛋糕 | `single_cake` | 單入-經典原味、單入-伯爵紅茶、單入-茉莉花茶 | 1個 = 0.25條 cake_bar |
-| 曲奇 | `cookie` | 原味白、可可粉、伯爵藍、綜合白、綜合粉、綜合藍 | 獨立計算 |
+| 曲奇 | `cookie` | 綜合白、綜合粉、綜合藍、原味白、可可粉、伯爵藍 | 獨立計算 |
+
+**旋轉筒雙維度追蹤**：
+- 訂單介面用 `tube`（按口味）：客戶點什麼口味 → 扣減 cake_bar
+- 庫存頁面用 `tube_pkg`（按包裝款式）：包裝容器消耗 → 選擇包裝款式時自動扣減
 
 ### 包裝/烙印規則
 
 | 類別 | 包裝款式 | 烙印款式 |
 |------|---------|---------|
 | 蜂蜜蛋糕 | 下拉：祝福緞帶(米)、森林旋律(粉)、歡樂派對(藍) | 下拉：甜蜜樂章、慶祝派對、馬年限定 |
-| 旋轉筒 | 下拉：四季童話、銀河探險、旋轉木馬 | 無 |
-| 單入蛋糕 | 下拉：愛心、花園、小熊 | **自由輸入框**（非下拉） |
+| 旋轉筒 | 下拉：四季童話、銀河探險、馬戲團 | 無 |
+| 單入蛋糕 | **每口味各自選擇**：愛心、花園、小熊 | **自由輸入框**（共用 1 個） |
 | 曲奇 | 無 | 無 |
 
-- 烙印款式整個區塊：**僅蜂蜜蛋糕有填數量時才啟用**
+- 烙印款式：**僅蜂蜜蛋糕有填數量時才啟用**
 - 包裝/烙印欄位：**填了數量後才動態顯示**
+- 單入蛋糕：每個有數量的口味各自顯示獨立包裝款式選擇
 - 一張訂單可**同時包含多種類別**
 
 ### 訂單功能
 
-- **新增/編輯/刪除**：完整 CRUD（點擊筆圖示編輯、垃圾桶刪除）
-- **庫存自動扣減**：新增訂單自動從 cake_bar 庫存扣減；刪除/編輯自動回沖
-- **CSV 匯出**：日訂單頁面可下載 CSV 檔案
-- **狀態欄**：自由輸入框（非下拉）
-- **列印勾選**：左側 checkbox，勾選後整列背景變黃色
+- **新增/編輯/刪除**：完整 CRUD（筆圖示=編輯、垃圾桶=刪除）
+- **庫存自動扣減**：
+  - cake → 扣 cake_bar（每口味 1 條/盒）
+  - tube → 扣 cake_bar（1 條/筒）+ 扣 tube_pkg（選擇的包裝款式）
+  - single_cake → 扣 cake_bar（0.25 條/個）
+  - 刪除/編輯訂單時自動回沖再重算
+- **CSV 匯出**：日訂單頁面「匯出」按鈕
+- **狀態欄**：自由輸入框
+- **列印勾選**：checkbox，勾選後整列背景變黃色
 
 ### Realtime 同步
 
 - `/calendar`、`/calendar/[date]`、`/inventory` 已啟用 Supabase Realtime
 - 多人同時操作時自動刷新，無需手動重整
+- 需在 Supabase Dashboard > Database > Publications 中啟用 `supabase_realtime` publication
 
 ### 統計儀表板（Recharts）
+
+| 統計卡片 | 說明 |
+|---------|------|
+| 本月訂單 | 總訂單筆數 |
+| 蛋糕出貨 | cake + single_cake 數量 |
+| 旋轉筒出貨 | tube 數量（紫色） |
+| 曲奇出貨 | cookie 數量 |
+| 未列印 | 尚未列印的訂單數 |
 
 | 圖表 | 類型 | 資料來源 |
 |------|------|---------|
 | 包裝款式統計 | BarChart（水平長條） | orders → packaging_styles |
 | 曲奇銷量分析 | PieChart（圓餅） | order_items → cookie products |
-| 每日出貨趨勢 | LineChart（折線） | order_items 按日期分組 |
+| 每日出貨趨勢 | LineChart（折線，3 線） | 蛋糕(粉紅)/旋轉筒(紫)/曲奇(琥珀) |
 | 每日訂單量 | AreaChart（面積） | orders 按日期分組 |
 
-### 設定頁面 CRUD
+### 產品庫存
 
-- 產品管理：按 category 分組，支援新增/編輯名稱/停用
-- 包裝款式管理：新增/編輯/停用，支援色碼設定
-- 烙印款式管理：新增/編輯/停用
+- 蛋糕條（cake_bar）：經典原味/伯爵紅茶/茉莉花茶
+- 曲奇（cookie）：顯示順序 綜合白→綜合粉→綜合藍→原味白→可可粉→伯爵藍
+- 旋轉筒包裝（tube_pkg）：四季童話/銀河探險/馬戲團
+- **日期選擇器**：可查看任意日期截止的歷史庫存餘額
+- 安全庫存警示 + 進度條
+- Realtime 即時同步
 
 ### 包材庫存
 
-- 包材品項 CRUD（名稱、單位、安全庫存）
+- 包材品項 CRUD（名稱、單位、安全庫存）+ 編輯/刪除/停用
 - 入庫紀錄管理
-- 產品 → 包材用量對照表
+- **階層式用量對照**：產品類別 → 口味 → 包裝款式 → 多種包材組成
+- 用量對照分組顯示（按產品+包裝分組）
+- **日期選擇器**：歷史庫存查詢
 - 低庫存警示
+
+### 設定頁面 CRUD
+
+- 產品管理：按 category 分組，支援新增/行內編輯名稱/停用
+- 包裝款式管理：新增/編輯/停用，支援色碼設定
+- 烙印款式管理：新增/編輯/停用
 
 ## 資料庫 Schema
 
@@ -99,29 +129,32 @@
 
 ```
 products         — 產品主檔 (category, name, sort_order, is_active)
+                   category CHECK: cake, cake_bar, cookie, tube, single_cake, tube_pkg
 packaging_styles — 包裝款式 (name, color_code, is_active)
 branding_styles  — 烙印款式 (name, is_active)
 orders           — 訂單 (order_date, customer_name, status, batch_info, printed,
                     cake_packaging_id, cake_branding_id,
                     tube_packaging_id,
                     single_cake_packaging_id, single_cake_branding_text)
-order_items      — 訂單品項 (order_id, product_id, quantity)
+order_items      — 訂單品項 (order_id, product_id, quantity, packaging_id)
+                   packaging_id: 單入蛋糕 per-item 包裝
 inventory        — 庫存紀錄 (product_id, date, type, quantity, reference_note)
 ```
 
 ### 包材相關表
 
 ```
-packaging_materials          — 包材主檔 (name, unit, safety_stock)
-packaging_material_inventory — 包材庫存紀錄
-product_material_usage       — 產品→包材用量對照
+packaging_materials          — 包材主檔 (name, unit, safety_stock, is_active)
+packaging_material_inventory — 包材庫存紀錄 (material_id, type, quantity, reference_note)
+product_material_usage       — 產品→包材用量對照 (product_id, packaging_style_id, material_id, quantity_per_unit)
 ```
 
 ### 庫存扣減機制
 
 - 訂單建立時：根據品項自動插入 `inventory` 記錄（type='outbound', quantity=負數）
-- `reference_note` 格式：`order:{orderId}`
+- `reference_note` 格式：`order:{orderId}`，用於追蹤和回沖
 - 刪除/編輯訂單時：先刪除對應 reference_note 的記錄，再重新計算
+- 旋轉筒雙重扣減：cake_bar（口味）+ tube_pkg（包裝款式）
 
 ### RLS 政策
 
@@ -135,6 +168,7 @@ product_material_usage       — 產品→包材用量對照
 | `001_initial_schema.sql` | 建表、索引、seed data、RLS、trigger |
 | `002_update_products.sql` | 新產品結構、新烙印/包裝、printed 欄位 |
 | `003_per_category_packaging.sql` | 每類別獨立 packaging/branding 欄位 |
+| `004_tube_rename_cookie_order.sql` | tube_pkg 產品、曲奇排序、order_items.packaging_id、product_material_usage.packaging_style_id |
 
 ## 檔案結構
 
@@ -149,20 +183,20 @@ packaging-calendar/
 │   │   │   ├── page.tsx            # 月曆視圖 (Realtime)
 │   │   │   └── [date]/page.tsx     # 日訂單管理 (CRUD+庫存+匯出+Realtime)
 │   │   ├── search/page.tsx         # 客戶搜尋
-│   │   ├── dashboard/page.tsx      # 統計儀表板 (Recharts)
-│   │   ├── inventory/page.tsx      # 產品庫存 (Realtime)
-│   │   ├── materials/page.tsx      # 包材庫存 (CRUD)
+│   │   ├── dashboard/page.tsx      # 統計儀表板 (Recharts, 5卡片+4圖表)
+│   │   ├── inventory/page.tsx      # 產品庫存 (Realtime+日期查詢)
+│   │   ├── materials/page.tsx      # 包材庫存 (CRUD+階層式用量對照+日期查詢)
 │   │   └── settings/page.tsx       # 設定 (CRUD)
 │   ├── components/
 │   │   ├── app-shell.tsx           # 側邊導航 + 頂部欄
-│   │   └── ui/                     # shadcn/ui 元件 (20+)
+│   │   └── ui/                     # shadcn/ui 元件 (20+, 基於 @base-ui/react)
 │   ├── lib/
 │   │   ├── supabase.ts             # 瀏覽器端 Supabase client
 │   │   ├── supabase-server.ts      # 伺服器端 Supabase client
 │   │   ├── types.ts                # TypeScript 型別定義
 │   │   └── utils.ts                # 工具函數
 │   └── middleware.ts               # Auth 保護路由
-├── supabase/migrations/            # DB migration SQL (3 檔)
+├── supabase/migrations/            # DB migration SQL (4 檔)
 ├── .env.local                      # Supabase URL + Key（不進 git）
 └── package.json
 ```
@@ -170,6 +204,14 @@ packaging-calendar/
 ## Git 提交歷史
 
 ```
+399192d feat: 用量對照改為階層式選擇 — 類別→口味→包裝→多種包材
+0bde37f feat: 包材庫存支援編輯和刪除功能
+a8676a7 feat: 統計儀表板新增旋轉筒出貨統計卡片與折線圖
+9328243 feat: 旋轉筒庫存改為追蹤包裝款式，訂單保留口味名稱
+d4fedaa fix: 旋轉筒保留口味名稱、單入蛋糕支援每口味獨立包裝款式
+e43e92c feat: 旋轉筒改包裝款式名稱、曲奇排序調整、庫存歷史日期查詢
+7336cae fix: 修復所有 Select 下拉選單顯示 UUID 代碼問題
+fabf02b docs: 更新 LAD.md 反映所有已完成功能
 9665e4f feat: 完成所有待辦功能 — 訂單編輯、庫存扣減、Recharts、CRUD、Realtime
 5e753b8 fix: 統計和搜尋頁面移除舊的 packaging_id join
 e5538f5 feat: 每個產品類別獨立包裝/烙印欄位
@@ -178,12 +220,68 @@ a370061 feat: 更新產品結構和訂單管理
 082a870 feat: 包裝行事曆 Web 應用初始版本
 ```
 
+## 待執行的 SQL Migration
+
+Migration 004 包含多項 DB schema 變更，需在 Supabase Dashboard > SQL Editor 執行：
+
+```sql
+-- 1. 擴充 category check constraint
+ALTER TABLE products DROP CONSTRAINT products_category_check;
+ALTER TABLE products ADD CONSTRAINT products_category_check
+  CHECK (category IN ('cake', 'cake_bar', 'cookie', 'tube', 'single_cake', 'tube_pkg'));
+
+-- 2. 新增旋轉筒包裝庫存產品
+INSERT INTO products (category, name, sort_order, is_active) VALUES
+  ('tube_pkg', '四季童話', 40, true),
+  ('tube_pkg', '銀河探險', 41, true),
+  ('tube_pkg', '馬戲團', 42, true);
+
+-- 3. 包裝款式改名
+UPDATE packaging_styles SET name = '馬戲團' WHERE name = '旋轉木馬';
+
+-- 4. 曲奇排序
+UPDATE products SET sort_order = 50 WHERE name LIKE '綜合白%' AND category = 'cookie';
+UPDATE products SET sort_order = 51 WHERE name LIKE '綜合粉%' AND category = 'cookie';
+UPDATE products SET sort_order = 52 WHERE name LIKE '綜合藍%' AND category = 'cookie';
+UPDATE products SET sort_order = 53 WHERE name LIKE '原味白%' AND category = 'cookie';
+UPDATE products SET sort_order = 54 WHERE name LIKE '可可粉%' AND category = 'cookie';
+UPDATE products SET sort_order = 55 WHERE name LIKE '伯爵藍%' AND category = 'cookie';
+
+-- 5. 單入蛋糕 per-item 包裝
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS packaging_id UUID REFERENCES packaging_styles(id);
+
+-- 6. 旋轉筒名稱恢復口味（若已被改過）
+UPDATE products SET name = '旋轉筒-經典原味' WHERE name = '旋轉筒-四季童話' AND category = 'tube';
+UPDATE products SET name = '旋轉筒-伯爵紅茶' WHERE name = '旋轉筒-銀河探險' AND category = 'tube';
+UPDATE products SET name = '旋轉筒-茉莉花茶' WHERE name = '旋轉筒-馬戲團' AND category = 'tube';
+
+-- 7. 用量對照含包裝款式維度
+ALTER TABLE product_material_usage ADD COLUMN IF NOT EXISTS packaging_style_id UUID REFERENCES packaging_styles(id);
+```
+
 ## 已知限制
 
 1. **middleware 警告** — Next.js 16 建議用 `proxy` 取代 `middleware`，功能正常但有警告
 2. **Supabase email 確認** — 預設需要 email 確認，可在 Authentication > Providers > Email 關閉 "Confirm email"
-3. **Supabase Realtime** — 需在 Supabase Dashboard > Database > Replication 中啟用相關表的 Realtime 功能
-4. **包材庫存** — 框架完成但尚無 seed data，需透過 UI 新增包材品項和用量對照
+3. **base-ui Select 顯示** — `@base-ui/react` 的 SelectValue 不會自動顯示 ItemText，需在 children 中手動解析 UUID → 名稱
+4. **Realtime 需手動啟用** — 需在 Supabase Dashboard > Database > Publications 中將相關表加入 `supabase_realtime` publication
+
+## 未完成事項
+
+### 高優先
+
+（目前無）
+
+### 中優先
+
+1. **包材自動扣減** — 目前包材庫存只有手動入庫，尚未根據訂單自動扣減包材（需結合 product_material_usage 對照表計算）
+2. **Realtime 啟用** — 需在 Supabase Dashboard 手動啟用相關表的 Realtime（`orders`, `order_items`, `inventory`）
+
+### 低優先
+
+3. **middleware 遷移** — Next.js 16 建議將 `middleware.ts` 改為 `proxy` 模式
+4. **自訂域名** — 可在 Vercel Dashboard > Domains 設定
+5. **匯出格式擴充** — 目前僅支援 CSV，可考慮加入 PDF 列印排版
 
 ## 環境資訊
 
@@ -197,13 +295,19 @@ a370061 feat: 更新產品結構和訂單管理
 ## 部署流程
 
 1. 修改程式碼
-2. `git add -A && git commit -m "..." && git push`
+2. `git add && git commit -m "..." && git push`
 3. Vercel 自動偵測 push → 建置 → 部署（1-2 分鐘）
 4. 若有 DB schema 變更，需手動到 Supabase Dashboard > SQL Editor 執行 migration SQL
 
 ## Realtime 啟用步驟
 
-若 Realtime 功能無法運作，需在 Supabase Dashboard 中：
-1. 前往 Database > Replication
-2. 啟用 `orders`、`order_items`、`inventory` 表的 Realtime
-3. 確認 RLS 政策允許 authenticated 用戶讀取
+在 Supabase Dashboard 中：
+1. 前往 Database > Publications
+2. 點選 `supabase_realtime` publication
+3. 將 `orders`、`order_items`、`inventory` 加入
+4. 或直接在 SQL Editor 執行：
+```sql
+ALTER PUBLICATION supabase_realtime ADD TABLE orders;
+ALTER PUBLICATION supabase_realtime ADD TABLE order_items;
+ALTER PUBLICATION supabase_realtime ADD TABLE inventory;
+```
