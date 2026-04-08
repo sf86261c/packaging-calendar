@@ -24,11 +24,12 @@ export default function DashboardPage() {
   const [stats, setStats] = useState({
     totalOrders: 0,
     totalCakes: 0,
+    totalTubes: 0,
     totalCookies: 0,
     pendingCount: 0,
     packagingStats: [] as { name: string; count: number }[],
     cookieStats: [] as { name: string; count: number }[],
-    dailyShipments: [] as { date: string; cakes: number; cookies: number }[],
+    dailyShipments: [] as { date: string; cakes: number; tubes: number; cookies: number }[],
     dailyOrders: [] as { date: string; orders: number }[],
   })
 
@@ -54,6 +55,7 @@ export default function DashboardPage() {
 
       let totalOrders = 0
       let totalCakes = 0
+      let totalTubes = 0
       let totalCookies = 0
       let pendingCount = 0
       const pkgMap: Record<string, number> = {}
@@ -61,6 +63,7 @@ export default function DashboardPage() {
 
       // Prepare daily maps
       const dailyCakeMap: Record<string, number> = {}
+      const dailyTubeMap: Record<string, number> = {}
       const dailyCookieMap: Record<string, number> = {}
       const dailyOrderMap: Record<string, number> = {}
 
@@ -69,6 +72,7 @@ export default function DashboardPage() {
       for (const day of allDays) {
         const key = format(day, 'yyyy-MM-dd')
         dailyCakeMap[key] = 0
+        dailyTubeMap[key] = 0
         dailyCookieMap[key] = 0
         dailyOrderMap[key] = 0
       }
@@ -92,9 +96,13 @@ export default function DashboardPage() {
           for (const item of (o.order_items || [])) {
             const cat = item.product?.category
             const name = item.product?.name
-            if (cat === 'cake' || cat === 'single_cake' || cat === 'tube') {
+            if (cat === 'cake' || cat === 'single_cake') {
               totalCakes += item.quantity
               dailyCakeMap[orderDate] = (dailyCakeMap[orderDate] || 0) + item.quantity
+            }
+            if (cat === 'tube') {
+              totalTubes += item.quantity
+              dailyTubeMap[orderDate] = (dailyTubeMap[orderDate] || 0) + item.quantity
             }
             if (cat === 'cookie') {
               totalCookies += item.quantity
@@ -111,6 +119,7 @@ export default function DashboardPage() {
         return {
           date: format(day, 'M/d'),
           cakes: dailyCakeMap[key] || 0,
+          tubes: dailyTubeMap[key] || 0,
           cookies: dailyCookieMap[key] || 0,
         }
       })
@@ -126,6 +135,7 @@ export default function DashboardPage() {
       setStats({
         totalOrders,
         totalCakes,
+        totalTubes,
         totalCookies,
         pendingCount,
         packagingStats: Object.entries(pkgMap)
@@ -160,7 +170,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Top 4 stat cards */}
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500">本月訂單</CardTitle></CardHeader>
           <CardContent><div className="text-3xl font-bold">{stats.totalOrders}</div><p className="text-xs text-gray-500">筆</p></CardContent>
@@ -168,6 +178,10 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500">蛋糕出貨</CardTitle></CardHeader>
           <CardContent><div className="text-3xl font-bold">{stats.totalCakes.toLocaleString()}</div><p className="text-xs text-gray-500">個</p></CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500">旋轉筒出貨</CardTitle></CardHeader>
+          <CardContent><div className="text-3xl font-bold text-purple-600">{stats.totalTubes.toLocaleString()}</div><p className="text-xs text-gray-500">個</p></CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500">曲奇出貨</CardTitle></CardHeader>
@@ -287,6 +301,15 @@ export default function DashboardPage() {
                   dataKey="cakes"
                   name="蛋糕"
                   stroke="#ec4899"
+                  strokeWidth={2}
+                  dot={{ r: 2 }}
+                  activeDot={{ r: 5 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="tubes"
+                  name="旋轉筒"
+                  stroke="#a855f7"
                   strokeWidth={2}
                   dot={{ r: 2 }}
                   activeDot={{ r: 5 }}
