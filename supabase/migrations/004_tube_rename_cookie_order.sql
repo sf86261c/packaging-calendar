@@ -26,3 +26,6 @@ ALTER TABLE order_items ADD COLUMN IF NOT EXISTS packaging_id UUID REFERENCES pa
 UPDATE products SET name = '旋轉筒-經典原味' WHERE name = '旋轉筒-四季童話' AND category = 'tube';
 UPDATE products SET name = '旋轉筒-伯爵紅茶' WHERE name = '旋轉筒-銀河探險' AND category = 'tube';
 UPDATE products SET name = '旋轉筒-茉莉花茶' WHERE name = '旋轉筒-馬戲團' AND category = 'tube';
+
+-- 6. product_material_usage 新增 packaging_style_id 欄位（用量對照含包裝款式維度）
+ALTER TABLE product_material_usage ADD COLUMN IF NOT EXISTS packaging_style_id UUID REFERENCES packaging_styles(id);

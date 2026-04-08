@@ -19,6 +19,23 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 
+// ─── Constants ────────────────────────────────
+
+const CATEGORY_OPTIONS = [
+  { value: 'cake', label: '蜂蜜蛋糕' },
+  { value: 'cookie', label: '曲奇餅乾' },
+  { value: 'tube', label: '旋轉筒' },
+  { value: 'single_cake', label: '單入蛋糕' },
+]
+
+const PACKAGING_BY_CATEGORY: Record<string, string[]> = {
+  cake: ['祝福緞帶(米)', '森林旋律(粉)', '歡樂派對(藍)'],
+  tube: ['四季童話', '銀河探險', '馬戲團'],
+  single_cake: ['愛心', '花園', '小熊'],
+}
+
+// ─── Interfaces ───────────────────────────────
+
 interface Material {
   id: string
   name: string
@@ -32,35 +49,34 @@ interface UsageRow {
   id: string
   product_id: string
   material_id: string
+  packaging_style_id: string | null
   quantity_per_unit: number
   product_name: string
+  product_category: string
+  packaging_name: string | null
 }
+
+interface MaterialRow {
+  materialId: string
+  qty: string
+}
+
+// ─── Component ────────────────────────────────
 
 export default function MaterialsPage() {
   const supabase = createClient()
   const [materials, setMaterials] = useState<Material[]>([])
   const [usages, setUsages] = useState<UsageRow[]>([])
   const [products, setProducts] = useState<any[]>([])
+  const [packagingStyles, setPackagingStyles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
 
   // Add material dialog
   const [addOpen, setAddOpen] = useState(false)
   const [matName, setMatName] = useState('')
   const [matUnit, setMatUnit] = useState('個')
   const [matSafety, setMatSafety] = useState('100')
-  const [saving, setSaving] = useState(false)
-
-  // Inbound dialog
-  const [inboundOpen, setInboundOpen] = useState(false)
-  const [inboundMat, setInboundMat] = useState('')
-  const [inboundQty, setInboundQty] = useState('')
-  const [inboundNote, setInboundNote] = useState('')
-
-  // Usage mapping dialog
-  const [usageOpen, setUsageOpen] = useState(false)
-  const [usageProduct, setUsageProduct] = useState('')
-  const [usageMaterial, setUsageMaterial] = useState('')
-  const [usageQty, setUsageQty] = useState('1')
 
   // Edit material dialog
   const [editOpen, setEditOpen] = useState(false)
@@ -69,17 +85,33 @@ export default function MaterialsPage() {
   const [editUnit, setEditUnit] = useState('')
   const [editSafety, setEditSafety] = useState('')
 
-  // Date picker for historical inventory
+  // Inbound dialog
+  const [inboundOpen, setInboundOpen] = useState(false)
+  const [inboundMat, setInboundMat] = useState('')
+  const [inboundQty, setInboundQty] = useState('')
+  const [inboundNote, setInboundNote] = useState('')
+
+  // Usage mapping dialog (redesigned)
+  const [usageOpen, setUsageOpen] = useState(false)
+  const [usageCategory, setUsageCategory] = useState('')
+  const [usageProduct, setUsageProduct] = useState('')
+  const [usagePackaging, setUsagePackaging] = useState('')
+  const [usageMaterials, setUsageMaterials] = useState<MaterialRow[]>([{ materialId: '', qty: '1' }])
+
+  // Date picker
   const [asOfDate, setAsOfDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+
+  // ─── Data fetching ────────────────────────────
 
   const fetchData = useCallback(async () => {
     setLoading(true)
 
-    const [matRes, invRes, usageRes, prodRes] = await Promise.all([
+    const [matRes, invRes, usageRes, prodRes, pkgRes] = await Promise.all([
       supabase.from('packaging_materials').select('*').order('name'),
       supabase.from('packaging_material_inventory').select('material_id, quantity').lte('created_at', `${asOfDate}T23:59:59.999Z`),
-      supabase.from('product_material_usage').select('id, product_id, material_id, quantity_per_unit, product:products(name)'),
+      supabase.from('product_material_usage').select('id, product_id, material_id, packaging_style_id, quantity_per_unit, product:products(name, category)'),
       supabase.from('products').select('id, name, category').eq('is_active', true).order('sort_order'),
+      supabase.from('packaging_styles').select('*').eq('is_active', true),
     ])
 
     const stockMap: Record<string, number> = {}
@@ -90,10 +122,7 @@ export default function MaterialsPage() {
     }
 
     if (matRes.data) {
-      setMaterials(matRes.data.map((m: any) => ({
-        ...m,
-        stock: stockMap[m.id] || 0,
-      })))
+      setMaterials(matRes.data.map((m: any) => ({ ...m, stock: stockMap[m.id] || 0 })))
     }
 
     if (usageRes.data) {
@@ -101,16 +130,30 @@ export default function MaterialsPage() {
         id: u.id,
         product_id: u.product_id,
         material_id: u.material_id,
+        packaging_style_id: u.packaging_style_id || null,
         quantity_per_unit: u.quantity_per_unit,
         product_name: u.product?.name || '未知',
+        product_category: u.product?.category || '',
+        packaging_name: null, // resolved below
       })))
     }
 
     if (prodRes.data) setProducts(prodRes.data)
+    if (pkgRes.data) setPackagingStyles(pkgRes.data)
     setLoading(false)
   }, [asOfDate])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  // Resolve packaging names after both usages and packagingStyles are loaded
+  const resolvedUsages = usages.map(u => ({
+    ...u,
+    packaging_name: u.packaging_style_id
+      ? packagingStyles.find((ps: any) => ps.id === u.packaging_style_id)?.name || null
+      : null,
+  }))
+
+  // ─── Material handlers ────────────────────────
 
   const handleAddMaterial = async () => {
     if (!matName.trim()) return
@@ -126,37 +169,25 @@ export default function MaterialsPage() {
     fetchData()
   }
 
-  const handleInbound = async () => {
-    if (!inboundMat || !inboundQty) return
-    setSaving(true)
-    await supabase.from('packaging_material_inventory').insert({
-      material_id: inboundMat,
-      type: 'inbound',
-      quantity: parseInt(inboundQty),
-      reference_note: inboundNote || null,
-    })
-    setInboundMat(''); setInboundQty(''); setInboundNote('')
-    setInboundOpen(false)
-    setSaving(false)
-    fetchData()
+  const openEditDialog = (m: Material) => {
+    setEditId(m.id); setEditName(m.name); setEditUnit(m.unit); setEditSafety(String(m.safety_stock))
+    setEditOpen(true)
   }
 
-  const handleAddUsage = async () => {
-    if (!usageProduct || !usageMaterial || !usageQty) return
+  const handleEditMaterial = async () => {
+    if (!editName.trim()) return
     setSaving(true)
-    await supabase.from('product_material_usage').insert({
-      product_id: usageProduct,
-      material_id: usageMaterial,
-      quantity_per_unit: parseFloat(usageQty),
-    })
-    setUsageProduct(''); setUsageMaterial(''); setUsageQty('1')
-    setUsageOpen(false)
-    setSaving(false)
-    fetchData()
+    await supabase.from('packaging_materials').update({
+      name: editName.trim(), unit: editUnit, safety_stock: parseInt(editSafety) || 0,
+    }).eq('id', editId)
+    setEditOpen(false); setSaving(false); fetchData()
   }
 
-  const handleDeleteUsage = async (id: string) => {
-    await supabase.from('product_material_usage').delete().eq('id', id)
+  const handleDeleteMaterial = async (id: string, name: string) => {
+    if (!confirm(`確定要刪除「${name}」？相關庫存記錄和用量對照也會一併刪除。`)) return
+    await supabase.from('packaging_material_inventory').delete().eq('material_id', id)
+    await supabase.from('product_material_usage').delete().eq('material_id', id)
+    await supabase.from('packaging_materials').delete().eq('id', id)
     fetchData()
   }
 
@@ -165,41 +196,104 @@ export default function MaterialsPage() {
     fetchData()
   }
 
-  const openEditDialog = (m: Material) => {
-    setEditId(m.id)
-    setEditName(m.name)
-    setEditUnit(m.unit)
-    setEditSafety(String(m.safety_stock))
-    setEditOpen(true)
-  }
+  // ─── Inbound handler ──────────────────────────
 
-  const handleEditMaterial = async () => {
-    if (!editName.trim()) return
+  const handleInbound = async () => {
+    if (!inboundMat || !inboundQty) return
     setSaving(true)
-    await supabase.from('packaging_materials').update({
-      name: editName.trim(),
-      unit: editUnit,
-      safety_stock: parseInt(editSafety) || 0,
-    }).eq('id', editId)
-    setEditOpen(false)
-    setSaving(false)
+    await supabase.from('packaging_material_inventory').insert({
+      material_id: inboundMat, type: 'inbound',
+      quantity: parseInt(inboundQty), reference_note: inboundNote || null,
+    })
+    setInboundMat(''); setInboundQty(''); setInboundNote('')
+    setInboundOpen(false); setSaving(false); fetchData()
+  }
+
+  // ─── Usage mapping handlers ───────────────────
+
+  const resetUsageForm = () => {
+    setUsageCategory(''); setUsageProduct(''); setUsagePackaging('')
+    setUsageMaterials([{ materialId: '', qty: '1' }])
+  }
+
+  const handleAddUsage = async () => {
+    if (!usageProduct) return
+    const validRows = usageMaterials.filter(m => m.materialId && parseFloat(m.qty) > 0)
+    if (validRows.length === 0) return
+
+    setSaving(true)
+    await supabase.from('product_material_usage').insert(
+      validRows.map(m => ({
+        product_id: usageProduct,
+        packaging_style_id: usagePackaging || null,
+        material_id: m.materialId,
+        quantity_per_unit: parseFloat(m.qty),
+      }))
+    )
+    resetUsageForm()
+    setUsageOpen(false); setSaving(false); fetchData()
+  }
+
+  const handleDeleteUsage = async (id: string) => {
+    await supabase.from('product_material_usage').delete().eq('id', id)
     fetchData()
   }
 
-  const handleDeleteMaterial = async (id: string, name: string) => {
-    if (!confirm(`確定要刪除「${name}」？相關庫存記錄和用量對照也會一併刪除。`)) return
-    // Delete related records first to avoid FK constraint errors
-    await supabase.from('packaging_material_inventory').delete().eq('material_id', id)
-    await supabase.from('product_material_usage').delete().eq('material_id', id)
-    await supabase.from('packaging_materials').delete().eq('id', id)
-    fetchData()
+  const addMaterialRow = () => {
+    setUsageMaterials(prev => [...prev, { materialId: '', qty: '1' }])
   }
+
+  const removeMaterialRow = (index: number) => {
+    setUsageMaterials(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const updateMaterialRow = (index: number, field: 'materialId' | 'qty', value: string) => {
+    setUsageMaterials(prev => prev.map((row, i) => i === index ? { ...row, [field]: value } : row))
+  }
+
+  // ─── Derived data ─────────────────────────────
 
   const activeMaterials = materials.filter(m => m.is_active)
+  const inactiveMaterials = materials.filter(m => !m.is_active)
   const lowStockCount = activeMaterials.filter(m => m.stock < m.safety_stock).length
+
+  // Products filtered by selected category
+  const filteredProducts = usageCategory
+    ? products.filter(p => p.category === usageCategory)
+    : []
+
+  // Packaging styles filtered by selected category
+  const filteredPackaging = usageCategory && PACKAGING_BY_CATEGORY[usageCategory]
+    ? packagingStyles.filter((ps: any) => PACKAGING_BY_CATEGORY[usageCategory]?.includes(ps.name))
+    : []
+
+  const hasPackaging = usageCategory && PACKAGING_BY_CATEGORY[usageCategory]
+
+  // Group usages by (product + packaging) for display
+  const usageGroups: { key: string; productName: string; category: string; packagingName: string | null; items: typeof resolvedUsages }[] = []
+  const groupMap = new Map<string, typeof resolvedUsages>()
+  for (const u of resolvedUsages) {
+    const key = `${u.product_id}__${u.packaging_style_id || 'none'}`
+    if (!groupMap.has(key)) groupMap.set(key, [])
+    groupMap.get(key)!.push(u)
+  }
+  for (const [key, items] of groupMap) {
+    const first = items[0]
+    const catLabel = CATEGORY_OPTIONS.find(c => c.value === first.product_category)?.label || first.product_category
+    usageGroups.push({
+      key,
+      productName: first.product_name,
+      category: catLabel,
+      packagingName: first.packaging_name,
+      items,
+    })
+  }
+
+  const pkgName = (id: string) => packagingStyles.find((p: any) => p.id === id)?.name || '選擇'
 
   return (
     <div>
+      {/* ── Header ── */}
       <div className="mb-6 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -212,22 +306,15 @@ export default function MaterialsPage() {
             )}
             {asOfDate !== format(new Date(), 'yyyy-MM-dd') && <Badge variant="outline" className="text-xs">歷史庫存</Badge>}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1.5">
               <CalendarDays className="h-4 w-4 text-gray-400" />
-              <Input
-                type="date"
-                value={asOfDate}
-                onChange={e => setAsOfDate(e.target.value)}
-                className="h-8 w-36 text-sm"
-              />
+              <Input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value)} className="h-8 w-36 text-sm" />
               {asOfDate !== format(new Date(), 'yyyy-MM-dd') && (
-                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setAsOfDate(format(new Date(), 'yyyy-MM-dd'))}>
-                  今天
-                </Button>
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setAsOfDate(format(new Date(), 'yyyy-MM-dd'))}>今天</Button>
               )}
             </div>
-            <Button variant="outline" size="sm" onClick={() => setUsageOpen(true)}>
+            <Button variant="outline" size="sm" onClick={() => { resetUsageForm(); setUsageOpen(true) }}>
               <Settings className="mr-1 h-4 w-4" /> 用量對照
             </Button>
             <Button variant="outline" size="sm" onClick={() => setInboundOpen(true)}>
@@ -240,7 +327,7 @@ export default function MaterialsPage() {
         </div>
       </div>
 
-      {/* Material stock cards */}
+      {/* ── Stock cards ── */}
       {activeMaterials.length === 0 && !loading ? (
         <Card className="mb-6">
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
@@ -263,15 +350,9 @@ export default function MaterialsPage() {
                     <span className="font-medium">{m.name}</span>
                     <div className="flex items-center gap-1">
                       {isLow && <Badge variant="destructive" className="text-xs">低庫存</Badge>}
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-blue-600" onClick={() => openEditDialog(m)}>
-                        <Pencil className="h-3 w-3" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-orange-600" onClick={() => handleToggleActive(m.id, m.is_active)} title="停用">
-                        <Ban className="h-3 w-3" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-red-600" onClick={() => handleDeleteMaterial(m.id, m.name)} title="刪除">
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-blue-600" onClick={() => openEditDialog(m)}><Pencil className="h-3 w-3" /></Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-orange-600" onClick={() => handleToggleActive(m.id, m.is_active)} title="停用"><Ban className="h-3 w-3" /></Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-red-600" onClick={() => handleDeleteMaterial(m.id, m.name)} title="刪除"><Trash2 className="h-3 w-3" /></Button>
                     </div>
                   </div>
                   <div className={`mt-2 text-3xl font-bold ${isLow ? 'text-red-600' : ''}`}>
@@ -280,10 +361,7 @@ export default function MaterialsPage() {
                   </div>
                   <div className="mt-1 text-xs text-gray-500">安全庫存: {m.safety_stock.toLocaleString()}</div>
                   <div className="mt-2 h-2 w-full rounded-full bg-gray-200">
-                    <div
-                      className={`h-2 rounded-full ${m.stock >= m.safety_stock ? 'bg-green-500' : m.stock > 0 ? 'bg-orange-500' : 'bg-red-500'}`}
-                      style={{ width: `${pct}%` }}
-                    />
+                    <div className={`h-2 rounded-full ${m.stock >= m.safety_stock ? 'bg-green-500' : m.stock > 0 ? 'bg-orange-500' : 'bg-red-500'}`} style={{ width: `${pct}%` }} />
                   </div>
                 </CardContent>
               </Card>
@@ -292,59 +370,53 @@ export default function MaterialsPage() {
         </div>
       )}
 
-      {/* Usage mapping table */}
-      {usages.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">產品 → 包材用量對照</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>產品</TableHead>
-                  <TableHead>包材</TableHead>
-                  <TableHead className="w-24">每單位用量</TableHead>
-                  <TableHead className="w-10"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {usages.map(u => {
-                  const mat = materials.find(m => m.id === u.material_id)
-                  return (
-                    <TableRow key={u.id}>
-                      <TableCell className="text-sm">{u.product_name}</TableCell>
-                      <TableCell className="text-sm">{mat?.name || '未知'}</TableCell>
-                      <TableCell className="text-sm">{u.quantity_per_unit} {mat?.unit || ''}</TableCell>
-                      <TableCell>
-                        <Button variant="ghost" size="sm" className="h-7 text-xs text-red-400 hover:text-red-600"
-                          onClick={() => handleDeleteUsage(u.id)}>
-                          刪除
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
+      {/* ── Usage mapping display (grouped) ── */}
+      {usageGroups.length > 0 && (
+        <Card className="mb-4">
+          <CardHeader><CardTitle className="text-base">產品 → 包材用量對照</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            {usageGroups.map(group => (
+              <div key={group.key} className="rounded-lg border p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <Badge variant="secondary" className="text-xs">{group.category}</Badge>
+                  <span className="text-sm font-medium">{group.productName}</span>
+                  {group.packagingName && (
+                    <Badge variant="outline" className="text-xs">📦 {group.packagingName}</Badge>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  {group.items.map(u => {
+                    const mat = materials.find(m => m.id === u.material_id)
+                    return (
+                      <div key={u.id} className="flex items-center justify-between text-sm">
+                        <span className="text-gray-600">• {mat?.name || '未知'}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-500">{u.quantity_per_unit} {mat?.unit || ''}</span>
+                          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-red-400 hover:text-red-600"
+                            onClick={() => handleDeleteUsage(u.id)}>刪除</Button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}
 
-      {/* Inactive materials */}
-      {materials.filter(m => !m.is_active).length > 0 && (
+      {/* ── Inactive materials ── */}
+      {inactiveMaterials.length > 0 && (
         <Card className="mt-4">
           <CardHeader><CardTitle className="text-sm text-gray-400">已停用包材</CardTitle></CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
-              {materials.filter(m => !m.is_active).map(m => (
+              {inactiveMaterials.map(m => (
                 <div key={m.id} className="flex items-center gap-1">
-                  <Badge variant="outline" className="text-gray-400 line-through cursor-pointer"
-                    onClick={() => handleToggleActive(m.id, m.is_active)}>
+                  <Badge variant="outline" className="text-gray-400 line-through cursor-pointer" onClick={() => handleToggleActive(m.id, m.is_active)}>
                     {m.name} (點擊啟用)
                   </Badge>
-                  <Button variant="ghost" size="icon" className="h-5 w-5 text-gray-300 hover:text-red-500"
-                    onClick={() => handleDeleteMaterial(m.id, m.name)}>
+                  <Button variant="ghost" size="icon" className="h-5 w-5 text-gray-300 hover:text-red-500" onClick={() => handleDeleteMaterial(m.id, m.name)}>
                     <Trash2 className="h-3 w-3" />
                   </Button>
                 </div>
@@ -367,7 +439,7 @@ export default function MaterialsPage() {
               <div>
                 <Label>單位</Label>
                 <Select value={matUnit} onValueChange={v => v && setMatUnit(v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger><SelectValue>{matUnit}</SelectValue></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="個">個</SelectItem>
                     <SelectItem value="張">張</SelectItem>
@@ -385,39 +457,6 @@ export default function MaterialsPage() {
             </div>
             <Button className="w-full" onClick={handleAddMaterial} disabled={saving || !matName.trim()}>
               {saving ? '儲存中...' : '新增包材'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Inbound Dialog ── */}
-      <Dialog open={inboundOpen} onOpenChange={setInboundOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>包材入庫</DialogTitle></DialogHeader>
-          <div className="space-y-4 pt-2">
-            <div>
-              <Label>包材</Label>
-              <Select value={inboundMat || undefined} onValueChange={v => v && setInboundMat(v)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="選擇包材">
-                    {inboundMat ? activeMaterials.find(m => m.id === inboundMat)?.name : undefined}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {activeMaterials.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>入庫數量</Label>
-              <Input type="number" min={1} value={inboundQty} onChange={e => setInboundQty(e.target.value)} placeholder="數量" />
-            </div>
-            <div>
-              <Label>備註</Label>
-              <Input value={inboundNote} onChange={e => setInboundNote(e.target.value)} placeholder="選填" />
-            </div>
-            <Button className="w-full" onClick={handleInbound} disabled={saving || !inboundMat || !inboundQty}>
-              {saving ? '儲存中...' : '確認入庫'}
             </Button>
           </div>
         </DialogContent>
@@ -459,43 +498,137 @@ export default function MaterialsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Usage Mapping Dialog ── */}
-      <Dialog open={usageOpen} onOpenChange={setUsageOpen}>
+      {/* ── Inbound Dialog ── */}
+      <Dialog open={inboundOpen} onOpenChange={setInboundOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>設定用量對照</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>包材入庫</DialogTitle></DialogHeader>
           <div className="space-y-4 pt-2">
             <div>
-              <Label>產品</Label>
-              <Select value={usageProduct || undefined} onValueChange={v => v && setUsageProduct(v)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="選擇產品">
-                    {usageProduct ? products.find(p => p.id === usageProduct)?.name : undefined}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
               <Label>包材</Label>
-              <Select value={usageMaterial || undefined} onValueChange={v => v && setUsageMaterial(v)}>
+              <Select value={inboundMat || undefined} onValueChange={v => v && setInboundMat(v)}>
                 <SelectTrigger>
-                  <SelectValue placeholder="選擇包材">
-                    {usageMaterial ? (() => { const m = activeMaterials.find(x => x.id === usageMaterial); return m ? `${m.name} (${m.unit})` : undefined })() : undefined}
-                  </SelectValue>
+                  <SelectValue placeholder="選擇包材">{inboundMat ? activeMaterials.find(m => m.id === inboundMat)?.name : undefined}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {activeMaterials.map(m => <SelectItem key={m.id} value={m.id}>{m.name} ({m.unit})</SelectItem>)}
+                  {activeMaterials.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label>每單位用量</Label>
-              <Input type="number" min={0} step={0.1} value={usageQty} onChange={e => setUsageQty(e.target.value)} placeholder="1" />
+              <Label>入庫數量</Label>
+              <Input type="number" min={1} value={inboundQty} onChange={e => setInboundQty(e.target.value)} placeholder="數量" />
             </div>
-            <Button className="w-full" onClick={handleAddUsage} disabled={saving || !usageProduct || !usageMaterial}>
-              {saving ? '儲存中...' : '新增對照'}
+            <div>
+              <Label>備註</Label>
+              <Input value={inboundNote} onChange={e => setInboundNote(e.target.value)} placeholder="選填" />
+            </div>
+            <Button className="w-full" onClick={handleInbound} disabled={saving || !inboundMat || !inboundQty}>
+              {saving ? '儲存中...' : '確認入庫'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Usage Mapping Dialog (redesigned) ── */}
+      <Dialog open={usageOpen} onOpenChange={(open) => { if (!open) resetUsageForm(); setUsageOpen(open) }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader><DialogTitle>設定用量對照</DialogTitle></DialogHeader>
+          <div className="space-y-4 pt-2">
+
+            {/* Step 1: Category */}
+            <div>
+              <Label>產品類別</Label>
+              <Select value={usageCategory || undefined} onValueChange={v => {
+                if (v) { setUsageCategory(v); setUsageProduct(''); setUsagePackaging('') }
+              }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="選擇類別">
+                    {usageCategory ? CATEGORY_OPTIONS.find(c => c.value === usageCategory)?.label : undefined}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORY_OPTIONS.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Step 2: Product (flavor) */}
+            {usageCategory && filteredProducts.length > 0 && (
+              <div>
+                <Label>口味</Label>
+                <Select value={usageProduct || undefined} onValueChange={v => v && setUsageProduct(v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="選擇口味">
+                      {usageProduct ? filteredProducts.find(p => p.id === usageProduct)?.name : undefined}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filteredProducts.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Step 3: Packaging style (if applicable) */}
+            {usageCategory && hasPackaging && filteredPackaging.length > 0 && (
+              <div>
+                <Label>包裝款式</Label>
+                <Select value={usagePackaging || undefined} onValueChange={v => v && setUsagePackaging(v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="選擇包裝款式">
+                      {usagePackaging ? pkgName(usagePackaging) : undefined}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filteredPackaging.map((ps: any) => <SelectItem key={ps.id} value={ps.id}>{ps.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Step 4: Materials list */}
+            {usageProduct && (
+              <div className="rounded-lg border p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-semibold">包材組成</Label>
+                  <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addMaterialRow}>
+                    <Plus className="mr-1 h-3 w-3" /> 新增包材
+                  </Button>
+                </div>
+                {usageMaterials.map((row, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <Select value={row.materialId || undefined} onValueChange={v => v && updateMaterialRow(idx, 'materialId', v)}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="選擇包材">
+                            {row.materialId ? activeMaterials.find(m => m.id === row.materialId)?.name : undefined}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {activeMaterials.map(m => <SelectItem key={m.id} value={m.id}>{m.name} ({m.unit})</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Input
+                      type="number" min={0} step={0.1}
+                      className="h-8 w-20 text-xs"
+                      value={row.qty}
+                      onChange={e => updateMaterialRow(idx, 'qty', e.target.value)}
+                      placeholder="數量"
+                    />
+                    {usageMaterials.length > 1 && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-600" onClick={() => removeMaterialRow(idx)}>
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <Button className="w-full" onClick={handleAddUsage}
+              disabled={saving || !usageProduct || usageMaterials.every(m => !m.materialId)}>
+              {saving ? '儲存中...' : '儲存對照'}
             </Button>
           </div>
         </DialogContent>
