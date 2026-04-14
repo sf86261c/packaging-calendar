@@ -51,18 +51,22 @@ interface BrandingStyle {
   is_active: boolean
 }
 
-// Category display config
+// Category display config (keys must match DB products.category CHECK constraint)
 const CATEGORY_LABELS: Record<string, string> = {
-  cake_combo: '蜂蜜蛋糕（組合盒）',
-  rotating_tube: '旋轉筒',
+  cake: '蜂蜜蛋糕（盒）',
+  cake_bar: '蛋糕原料（條）',
+  tube: '旋轉筒',
+  tube_pkg: '旋轉筒包裝',
   single_cake: '單入蛋糕',
   cookie: '曲奇',
 }
 
 const CATEGORY_ICONS: Record<string, string> = {
-  cake_combo: '🍰',
-  rotating_tube: '🫙',
-  single_cake: '📦',
+  cake: '🍰',
+  cake_bar: '🍞',
+  tube: '🫙',
+  tube_pkg: '📦',
+  single_cake: '🧁',
   cookie: '🍪',
 }
 
