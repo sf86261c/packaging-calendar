@@ -302,6 +302,7 @@ export default function DayOrderPage() {
       else if (product.category === 'tube') pkgStyleId = orderTubePackagingId
       else if (product.category === 'single_cake') pkgStyleId = singleCakePackagingMap?.[productId]
 
+      // Match both specific (packaging_style_id=Y) and universal (null) usages — additive by design
       const matched = materialUsages.filter(
         u => u.product_id === productId
           && (u.packaging_style_id === (pkgStyleId || null) || u.packaging_style_id === null)
@@ -339,6 +340,14 @@ export default function DayOrderPage() {
 
   const reverseMaterialDeductions = async (orderId: string) => {
     await supabase.from('packaging_material_inventory').delete().eq('reference_note', `order:${orderId}`)
+  }
+
+  const showMaterialWarnings = (combos: { productName: string; packagingName: string | null }[]) => {
+    if (combos.length === 0) return
+    const lines = combos.map(c =>
+      `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`
+    )
+    setMaterialWarning(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
   }
 
   // ─── Save (add or edit) ─────────────────────────────
@@ -393,12 +402,7 @@ export default function DayOrderPage() {
         formSingleCakePackaging,
       )
       await applyMaterialDeductions(editingOrderId, matResult.deductions)
-      if (matResult.missingCombos.length > 0) {
-        const lines = matResult.missingCombos.map(c =>
-          `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`
-        )
-        setMaterialWarning(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
-      }
+      showMaterialWarnings(matResult.missingCombos)
     } else {
       // ── Add mode ──
       const { data: order } = await supabase
@@ -422,12 +426,7 @@ export default function DayOrderPage() {
           formSingleCakePackaging,
         )
         await applyMaterialDeductions(order.id, matResult.deductions)
-        if (matResult.missingCombos.length > 0) {
-          const lines = matResult.missingCombos.map(c =>
-            `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`
-          )
-          setMaterialWarning(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
-        }
+        showMaterialWarnings(matResult.missingCombos)
       }
     }
 
