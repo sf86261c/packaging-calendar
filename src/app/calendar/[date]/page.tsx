@@ -22,12 +22,6 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 
-const PACKAGING_CATEGORIES: Record<string, string[]> = {
-  cake: ['祝福緞帶(米)', '森林旋律(粉)', '歡樂派對(藍)'],
-  tube: ['四季童話', '銀河探險', '馬戲團'],
-  single_cake: ['愛心', '花園', '小熊'],
-}
-
 /** Extract flavor keywords from product name by category */
 function extractFlavors(name: string, category: string): string[] {
   if (category === 'cake') return name.split('+').map(s => s.trim())
@@ -366,9 +360,9 @@ export default function DayOrderPage() {
   const formHasTube = tubeProducts.some(p => (formItems[p.id] || 0) > 0)
   const formHasSingle = singleCakeProducts.some(p => (formItems[p.id] || 0) > 0)
 
-  const cakePackagingOptions = packagingStyles.filter(ps => PACKAGING_CATEGORIES.cake?.includes(ps.name))
-  const tubePackagingOptions = packagingStyles.filter(ps => PACKAGING_CATEGORIES.tube?.includes(ps.name))
-  const singleCakePackagingOptions = packagingStyles.filter(ps => PACKAGING_CATEGORIES.single_cake?.includes(ps.name))
+  const cakePackagingOptions = packagingStyles.filter((ps: any) => ps.category === 'cake')
+  const tubePackagingOptions = packagingStyles.filter((ps: any) => ps.category === 'tube')
+  const singleCakePackagingOptions = packagingStyles.filter((ps: any) => ps.category === 'single_cake')
 
   const pkgName = (id: string) => packagingStyles.find((p: any) => p.id === id)?.name || '選擇'
   const brandName = (id: string) => brandingStyles.find((b: any) => b.id === id)?.name || '選擇'
@@ -606,7 +600,7 @@ export default function DayOrderPage() {
                           <SelectValue placeholder="選擇">{formCakeBranding ? brandName(formCakeBranding) : undefined}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          {brandingStyles.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                          {brandingStyles.filter((b: any) => b.category === 'cake').map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </div>

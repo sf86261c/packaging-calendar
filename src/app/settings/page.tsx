@@ -40,12 +40,14 @@ interface PackagingStyle {
   id: string
   name: string
   color_code: string
+  category: string | null
   is_active: boolean
 }
 
 interface BrandingStyle {
   id: string
   name: string
+  category: string | null
   is_active: boolean
 }
 
@@ -65,6 +67,24 @@ const CATEGORY_ICONS: Record<string, string> = {
 }
 
 const CATEGORY_OPTIONS = Object.entries(CATEGORY_LABELS).map(([value, label]) => ({
+  value,
+  label,
+}))
+
+// Packaging/branding applicable category labels (uses DB category values)
+const PKG_CATEGORY_LABELS: Record<string, string> = {
+  cake: '蜂蜜蛋糕',
+  tube: '旋轉筒',
+  single_cake: '單入蛋糕',
+}
+
+const PKG_CATEGORY_ICONS: Record<string, string> = {
+  cake: '🍰',
+  tube: '🫙',
+  single_cake: '📦',
+}
+
+const PKG_CATEGORY_OPTIONS = Object.entries(PKG_CATEGORY_LABELS).map(([value, label]) => ({
   value,
   label,
 }))
@@ -182,7 +202,9 @@ export default function SettingsPage() {
   const [newProductName, setNewProductName] = useState('')
   const [newPackagingName, setNewPackagingName] = useState('')
   const [newPackagingColor, setNewPackagingColor] = useState('#000000')
+  const [newPackagingCategory, setNewPackagingCategory] = useState('')
   const [newBrandingName, setNewBrandingName] = useState('')
+  const [newBrandingCategory, setNewBrandingCategory] = useState('')
 
   // --- Fetch data ----------------------------------------------------------
 
@@ -249,13 +271,15 @@ export default function SettingsPage() {
 
   const addPackagingStyle = async () => {
     const trimmed = newPackagingName.trim()
-    if (!trimmed) return
+    if (!trimmed || !newPackagingCategory) return
     await supabase.from('packaging_styles').insert({
       name: trimmed,
       color_code: newPackagingColor,
+      category: newPackagingCategory,
     })
     setNewPackagingName('')
     setNewPackagingColor('#000000')
+    setNewPackagingCategory('')
     setPackagingDialogOpen(false)
     fetchPackagingStyles()
   }
@@ -280,9 +304,13 @@ export default function SettingsPage() {
 
   const addBrandingStyle = async () => {
     const trimmed = newBrandingName.trim()
-    if (!trimmed) return
-    await supabase.from('branding_styles').insert({ name: trimmed })
+    if (!trimmed || !newBrandingCategory) return
+    await supabase.from('branding_styles').insert({
+      name: trimmed,
+      category: newBrandingCategory,
+    })
     setNewBrandingName('')
+    setNewBrandingCategory('')
     setBrandingDialogOpen(false)
     fetchBrandingStyles()
   }
@@ -309,6 +337,24 @@ export default function SettingsPage() {
         ...acc,
         [cat]: [...(acc[cat] ?? []), product],
       }
+    },
+    {}
+  )
+
+  // --- Group packaging/branding by category --------------------------------
+
+  const packagingByCategory = packagingStyles.reduce<Record<string, PackagingStyle[]>>(
+    (acc, style) => {
+      const cat = style.category || 'uncategorized'
+      return { ...acc, [cat]: [...(acc[cat] ?? []), style] }
+    },
+    {}
+  )
+
+  const brandingByCategory = brandingStyles.reduce<Record<string, BrandingStyle[]>>(
+    (acc, style) => {
+      const cat = style.category || 'uncategorized'
+      return { ...acc, [cat]: [...(acc[cat] ?? []), style] }
     },
     {}
   )
@@ -444,42 +490,50 @@ export default function SettingsPage() {
               新增
             </Button>
           </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {packagingStyles.map((style) => (
-                <div key={style.id} className="flex items-center gap-1.5">
-                  <Badge
-                    variant="outline"
-                    className={
-                      !style.is_active
-                        ? 'text-gray-400 line-through opacity-60'
-                        : ''
-                    }
-                  >
-                    <span
-                      className="mr-1 inline-block size-2.5 rounded-full"
-                      style={{ backgroundColor: style.color_code }}
-                    />
-                    <InlineEditName
-                      value={style.name}
-                      isActive={style.is_active}
-                      onSave={(name) =>
-                        updatePackagingStyle(style.id, { name })
-                      }
-                    />
-                  </Badge>
-                  <ActiveToggle
-                    isActive={style.is_active}
-                    onToggle={() =>
-                      togglePackagingActive(style.id, style.is_active)
-                    }
-                  />
+          <CardContent className="space-y-4">
+            {Object.entries(packagingByCategory).map(([category, styles]) => (
+              <div key={category}>
+                <p className="mb-1 text-xs text-gray-400">
+                  {PKG_CATEGORY_ICONS[category] ?? '📋'}{' '}
+                  {PKG_CATEGORY_LABELS[category] ?? '未分類'}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {styles.map((style) => (
+                    <div key={style.id} className="flex items-center gap-1.5">
+                      <Badge
+                        variant="outline"
+                        className={
+                          !style.is_active
+                            ? 'text-gray-400 line-through opacity-60'
+                            : ''
+                        }
+                      >
+                        <span
+                          className="mr-1 inline-block size-2.5 rounded-full"
+                          style={{ backgroundColor: style.color_code }}
+                        />
+                        <InlineEditName
+                          value={style.name}
+                          isActive={style.is_active}
+                          onSave={(name) =>
+                            updatePackagingStyle(style.id, { name })
+                          }
+                        />
+                      </Badge>
+                      <ActiveToggle
+                        isActive={style.is_active}
+                        onToggle={() =>
+                          togglePackagingActive(style.id, style.is_active)
+                        }
+                      />
+                    </div>
+                  ))}
                 </div>
-              ))}
-              {packagingStyles.length === 0 && (
-                <p className="text-sm text-gray-400">尚無包裝款式，請新增</p>
-              )}
-            </div>
+              </div>
+            ))}
+            {packagingStyles.length === 0 && (
+              <p className="text-sm text-gray-400">尚無包裝款式，請新增</p>
+            )}
           </CardContent>
         </Card>
 
@@ -496,6 +550,28 @@ export default function SettingsPage() {
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label>適用類別</Label>
+                <Select
+                  value={newPackagingCategory || undefined}
+                  onValueChange={(v) => v && setNewPackagingCategory(v)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="選擇類別">
+                      {newPackagingCategory
+                        ? `${PKG_CATEGORY_ICONS[newPackagingCategory] || ''} ${PKG_CATEGORY_LABELS[newPackagingCategory] || newPackagingCategory}`
+                        : undefined}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PKG_CATEGORY_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {PKG_CATEGORY_ICONS[opt.value]} {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1.5">
                 <Label>名稱</Label>
                 <Input
@@ -546,36 +622,44 @@ export default function SettingsPage() {
               新增
             </Button>
           </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {brandingStyles.map((style) => (
-                <div key={style.id} className="flex items-center gap-1.5">
-                  <Badge
-                    variant="outline"
-                    className={
-                      !style.is_active
-                        ? 'text-gray-400 line-through opacity-60'
-                        : ''
-                    }
-                  >
-                    <InlineEditName
-                      value={style.name}
-                      isActive={style.is_active}
-                      onSave={(name) => updateBrandingName(style.id, name)}
-                    />
-                  </Badge>
-                  <ActiveToggle
-                    isActive={style.is_active}
-                    onToggle={() =>
-                      toggleBrandingActive(style.id, style.is_active)
-                    }
-                  />
+          <CardContent className="space-y-4">
+            {Object.entries(brandingByCategory).map(([category, styles]) => (
+              <div key={category}>
+                <p className="mb-1 text-xs text-gray-400">
+                  {PKG_CATEGORY_ICONS[category] ?? '📋'}{' '}
+                  {PKG_CATEGORY_LABELS[category] ?? '未分類'}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {styles.map((style) => (
+                    <div key={style.id} className="flex items-center gap-1.5">
+                      <Badge
+                        variant="outline"
+                        className={
+                          !style.is_active
+                            ? 'text-gray-400 line-through opacity-60'
+                            : ''
+                        }
+                      >
+                        <InlineEditName
+                          value={style.name}
+                          isActive={style.is_active}
+                          onSave={(name) => updateBrandingName(style.id, name)}
+                        />
+                      </Badge>
+                      <ActiveToggle
+                        isActive={style.is_active}
+                        onToggle={() =>
+                          toggleBrandingActive(style.id, style.is_active)
+                        }
+                      />
+                    </div>
+                  ))}
                 </div>
-              ))}
-              {brandingStyles.length === 0 && (
-                <p className="text-sm text-gray-400">尚無烙印款式，請新增</p>
-              )}
-            </div>
+              </div>
+            ))}
+            {brandingStyles.length === 0 && (
+              <p className="text-sm text-gray-400">尚無烙印款式，請新增</p>
+            )}
           </CardContent>
         </Card>
 
@@ -590,6 +674,28 @@ export default function SettingsPage() {
               <DialogDescription>輸入烙印款式名稱</DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label>適用類別</Label>
+                <Select
+                  value={newBrandingCategory || undefined}
+                  onValueChange={(v) => v && setNewBrandingCategory(v)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="選擇類別">
+                      {newBrandingCategory
+                        ? `${PKG_CATEGORY_ICONS[newBrandingCategory] || ''} ${PKG_CATEGORY_LABELS[newBrandingCategory] || newBrandingCategory}`
+                        : undefined}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PKG_CATEGORY_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {PKG_CATEGORY_ICONS[opt.value]} {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1.5">
                 <Label>名稱</Label>
                 <Input

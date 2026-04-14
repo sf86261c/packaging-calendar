@@ -14,12 +14,14 @@ export interface PackagingStyle {
   id: string
   name: string
   color_code: string
+  category: string | null
   is_active: boolean
 }
 
 export interface BrandingStyle {
   id: string
   name: string
+  category: string | null
   is_active: boolean
 }
 
