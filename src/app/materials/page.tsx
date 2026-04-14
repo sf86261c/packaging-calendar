@@ -94,7 +94,7 @@ export default function MaterialsPage() {
   // Usage mapping dialog (redesigned)
   const [usageOpen, setUsageOpen] = useState(false)
   const [usageCategory, setUsageCategory] = useState('')
-  const [usageProduct, setUsageProduct] = useState('')
+  const [usageProducts, setUsageProducts] = useState<string[]>([])
   const [usagePackaging, setUsagePackaging] = useState('')
   const [usageMaterials, setUsageMaterials] = useState<MaterialRow[]>([{ materialId: '', qty: '1' }])
 
@@ -212,24 +212,25 @@ export default function MaterialsPage() {
   // ─── Usage mapping handlers ───────────────────
 
   const resetUsageForm = () => {
-    setUsageCategory(''); setUsageProduct(''); setUsagePackaging('')
+    setUsageCategory(''); setUsageProducts([]); setUsagePackaging('')
     setUsageMaterials([{ materialId: '', qty: '1' }])
   }
 
   const handleAddUsage = async () => {
-    if (!usageProduct) return
+    if (usageProducts.length === 0) return
     const validRows = usageMaterials.filter(m => m.materialId && parseFloat(m.qty) > 0)
     if (validRows.length === 0) return
 
     setSaving(true)
-    await supabase.from('product_material_usage').insert(
+    const inserts = usageProducts.flatMap(productId =>
       validRows.map(m => ({
-        product_id: usageProduct,
+        product_id: productId,
         packaging_style_id: usagePackaging || null,
         material_id: m.materialId,
         quantity_per_unit: parseFloat(m.qty),
       }))
     )
+    await supabase.from('product_material_usage').insert(inserts)
     resetUsageForm()
     setUsageOpen(false); setSaving(false); fetchData()
   }
@@ -237,6 +238,18 @@ export default function MaterialsPage() {
   const handleDeleteUsage = async (id: string) => {
     await supabase.from('product_material_usage').delete().eq('id', id)
     fetchData()
+  }
+
+  const toggleProduct = (id: string) => {
+    setUsageProducts(prev =>
+      prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id]
+    )
+  }
+
+  const toggleAllProducts = () => {
+    setUsageProducts(prev =>
+      prev.length === filteredProducts.length ? [] : filteredProducts.map(p => p.id)
+    )
   }
 
   const addMaterialRow = () => {
@@ -539,7 +552,7 @@ export default function MaterialsPage() {
             <div>
               <Label>產品類別</Label>
               <Select value={usageCategory || undefined} onValueChange={v => {
-                if (v) { setUsageCategory(v); setUsageProduct(''); setUsagePackaging('') }
+                if (v) { setUsageCategory(v); setUsageProducts([]); setUsagePackaging('') }
               }}>
                 <SelectTrigger>
                   <SelectValue placeholder="選擇類別">
@@ -552,20 +565,31 @@ export default function MaterialsPage() {
               </Select>
             </div>
 
-            {/* Step 2: Product (flavor) */}
+            {/* Step 2: Products (multi-select) */}
             {usageCategory && filteredProducts.length > 0 && (
               <div>
-                <Label>口味</Label>
-                <Select value={usageProduct || undefined} onValueChange={v => v && setUsageProduct(v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="選擇口味">
-                      {usageProduct ? filteredProducts.find(p => p.id === usageProduct)?.name : undefined}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredProducts.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center justify-between mb-1">
+                  <Label>產品（可複選）</Label>
+                  <Button variant="ghost" size="sm" className="h-6 text-xs px-2" onClick={toggleAllProducts}>
+                    {usageProducts.length === filteredProducts.length ? '取消全選' : '全選'}
+                  </Button>
+                </div>
+                <div className="rounded-lg border p-2 max-h-48 overflow-y-auto space-y-0.5">
+                  {filteredProducts.map(p => (
+                    <label key={p.id} className="flex items-center gap-2 cursor-pointer rounded px-2 py-1.5 hover:bg-gray-50">
+                      <input
+                        type="checkbox"
+                        checked={usageProducts.includes(p.id)}
+                        onChange={() => toggleProduct(p.id)}
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm">{p.name}</span>
+                    </label>
+                  ))}
+                </div>
+                {usageProducts.length > 0 && (
+                  <p className="mt-1 text-xs text-gray-500">已選 {usageProducts.length} / {filteredProducts.length} 項</p>
+                )}
               </div>
             )}
 
@@ -587,7 +611,7 @@ export default function MaterialsPage() {
             )}
 
             {/* Step 4: Materials list */}
-            {usageProduct && (
+            {usageProducts.length > 0 && (
               <div className="rounded-lg border p-3 space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm font-semibold">包材組成</Label>
@@ -627,7 +651,7 @@ export default function MaterialsPage() {
             )}
 
             <Button className="w-full" onClick={handleAddUsage}
-              disabled={saving || !usageProduct || usageMaterials.every(m => !m.materialId)}>
+              disabled={saving || usageProducts.length === 0 || usageMaterials.every(m => !m.materialId)}>
               {saving ? '儲存中...' : '儲存對照'}
             </Button>
           </div>
