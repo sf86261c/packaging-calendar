@@ -61,6 +61,8 @@ export default function DayOrderPage() {
   const [products, setProducts] = useState<any[]>([])
   const [packagingStyles, setPackagingStyles] = useState<any[]>([])
   const [brandingStyles, setBrandingStyles] = useState<any[]>([])
+  const [materialUsages, setMaterialUsages] = useState<{ product_id: string; material_id: string; packaging_style_id: string | null; quantity_per_unit: number }[]>([])
+  const [materialWarning, setMaterialWarning] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null)
@@ -135,6 +137,9 @@ export default function DayOrderPage() {
     supabase.from('branding_styles').select('*').eq('is_active', true).then(({ data }) => {
       if (data) setBrandingStyles(data)
     })
+    supabase.from('product_material_usage').select('product_id, material_id, packaging_style_id, quantity_per_unit').then(({ data }) => {
+      if (data) setMaterialUsages(data)
+    })
 
     // Realtime: auto-refresh when orders change
     const channel = supabase
@@ -149,6 +154,12 @@ export default function DayOrderPage() {
 
     return () => { supabase.removeChannel(channel) }
   }, [fetchOrders, dateStr])
+
+  useEffect(() => {
+    if (!materialWarning) return
+    const timer = setTimeout(() => setMaterialWarning(null), 8000)
+    return () => clearTimeout(timer)
+  }, [materialWarning])
 
   // ─── Form helpers ───────────────────────────────────
 
@@ -269,6 +280,67 @@ export default function DayOrderPage() {
     await supabase.from('inventory').delete().eq('reference_note', `order:${orderId}`)
   }
 
+  // ─── Packaging material deduction ─────────────────────
+
+  const calculateMaterialDeductions = (
+    itemEntries: [string, number][],
+    orderCakePackagingId?: string,
+    orderTubePackagingId?: string,
+    singleCakePackagingMap?: Record<string, string>,
+  ) => {
+    const deductions: Record<string, number> = {}
+    const missingCombos: { productName: string; packagingName: string | null }[] = []
+
+    for (const [productId, qty] of itemEntries) {
+      if (qty <= 0) continue
+      const product = products.find((p: any) => p.id === productId)
+      if (!product) continue
+      if (product.category === 'cake_bar' || product.category === 'tube_pkg') continue
+
+      let pkgStyleId: string | undefined
+      if (product.category === 'cake') pkgStyleId = orderCakePackagingId
+      else if (product.category === 'tube') pkgStyleId = orderTubePackagingId
+      else if (product.category === 'single_cake') pkgStyleId = singleCakePackagingMap?.[productId]
+
+      const matched = materialUsages.filter(
+        u => u.product_id === productId
+          && (u.packaging_style_id === (pkgStyleId || null) || u.packaging_style_id === null)
+      )
+
+      if (matched.length === 0) {
+        const pkgName = pkgStyleId
+          ? packagingStyles.find(ps => ps.id === pkgStyleId)?.name ?? null
+          : null
+        missingCombos.push({ productName: product.name, packagingName: pkgName })
+      }
+
+      for (const usage of matched) {
+        deductions[usage.material_id] =
+          (deductions[usage.material_id] || 0) + qty * usage.quantity_per_unit
+      }
+    }
+
+    return { deductions, missingCombos }
+  }
+
+  const applyMaterialDeductions = async (orderId: string, deductions: Record<string, number>) => {
+    const records = Object.entries(deductions)
+      .filter(([, qty]) => qty > 0)
+      .map(([materialId, qty]) => ({
+        material_id: materialId,
+        type: 'outbound' as const,
+        quantity: -Math.round(qty * 100) / 100,
+        reference_note: `order:${orderId}`,
+      }))
+    if (records.length > 0) {
+      await supabase.from('packaging_material_inventory').insert(records)
+    }
+  }
+
+  const reverseMaterialDeductions = async (orderId: string) => {
+    await supabase.from('packaging_material_inventory').delete().eq('reference_note', `order:${orderId}`)
+  }
+
   // ─── Save (add or edit) ─────────────────────────────
 
   const handleSaveOrder = async () => {
@@ -308,9 +380,25 @@ export default function DayOrderPage() {
       if (itemEntries.length > 0) {
         await supabase.from('order_items').insert(buildItemRows(editingOrderId))
       }
+      // Product inventory
       await reverseDeductions(editingOrderId)
       const deductions = calculateDeductions(itemEntries, formTubePackaging || undefined)
       await applyDeductions(editingOrderId, deductions)
+      // Packaging material inventory
+      await reverseMaterialDeductions(editingOrderId)
+      const matResult = calculateMaterialDeductions(
+        itemEntries,
+        formCakePackaging || undefined,
+        formTubePackaging || undefined,
+        formSingleCakePackaging,
+      )
+      await applyMaterialDeductions(editingOrderId, matResult.deductions)
+      if (matResult.missingCombos.length > 0) {
+        const lines = matResult.missingCombos.map(c =>
+          `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`
+        )
+        setMaterialWarning(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
+      }
     } else {
       // ── Add mode ──
       const { data: order } = await supabase
@@ -323,8 +411,23 @@ export default function DayOrderPage() {
         if (itemEntries.length > 0) {
           await supabase.from('order_items').insert(buildItemRows(order.id))
         }
+        // Product inventory
         const deductions = calculateDeductions(itemEntries, formTubePackaging || undefined)
         await applyDeductions(order.id, deductions)
+        // Packaging material inventory
+        const matResult = calculateMaterialDeductions(
+          itemEntries,
+          formCakePackaging || undefined,
+          formTubePackaging || undefined,
+          formSingleCakePackaging,
+        )
+        await applyMaterialDeductions(order.id, matResult.deductions)
+        if (matResult.missingCombos.length > 0) {
+          const lines = matResult.missingCombos.map(c =>
+            `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`
+          )
+          setMaterialWarning(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
+        }
       }
     }
 
@@ -337,6 +440,7 @@ export default function DayOrderPage() {
   const handleDelete = async (orderId: string) => {
     if (!confirm('確定要刪除這筆訂單嗎？')) return
     await reverseDeductions(orderId)
+    await reverseMaterialDeductions(orderId)
     await supabase.from('orders').delete().eq('id', orderId)
     fetchOrders()
   }
@@ -444,6 +548,15 @@ export default function DayOrderPage() {
           </Button>
         </div>
       </div>
+
+      {materialWarning && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <div className="flex items-start justify-between">
+            <pre className="whitespace-pre-wrap font-sans">{materialWarning}</pre>
+            <button onClick={() => setMaterialWarning(null)} className="ml-2 text-amber-600 hover:text-amber-800">✕</button>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
         <Card>

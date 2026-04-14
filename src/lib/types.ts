@@ -93,6 +93,7 @@ export interface ProductMaterialUsage {
   id: string
   product_id: string
   material_id: string
+  packaging_style_id: string | null
   quantity_per_unit: number
   product?: Product
   material?: PackagingMaterial
