@@ -72,6 +72,13 @@
   - tube → 扣 cake_bar（1 條/筒）+ 扣 tube_pkg（選擇的包裝款式）
   - single_cake → 扣 cake_bar（0.25 條/個）
   - 刪除/編輯訂單時自動回沖再重算
+- **包材自動扣減**：
+  - 根據 `product_material_usage` 對照表，自動計算各包材用量並寫入 `packaging_material_inventory`
+  - 匹配規則：精確匹配 `packaging_style_id` + 通用匹配（null），兩者合併計算
+  - 支援 cake/tube/single_cake/cookie 所有類別（cake_bar/tube_pkg 原料跳過）
+  - 刪除/編輯訂單時自動回沖再重算
+  - 缺少對照的組合顯示黃色警示 banner（8 秒自動消失）
+  - 新增包材只需在 `/materials` 設定用量對照，無需改程式碼
 - **CSV 匯出**：日訂單頁面「匯出」按鈕
 - **狀態欄**：自由輸入框
 - **列印勾選**：checkbox，勾選後整列背景變黃色
@@ -208,7 +215,9 @@ packaging-calendar/
 ## Git 提交歷史
 
 ```
-xxxxxxx feat: 包裝/烙印款式新增適用類別關聯，移除硬編碼
+1c77fe4 refactor: 抽出 showMaterialWarnings helper，加註解釐清匹配邏輯
+0f5ec8d feat: 訂單建立/編輯/刪除時自動扣減包材庫存
+1cc69b2 feat: 包裝/烙印款式新增適用類別關聯，移除硬編碼
 399192d feat: 用量對照改為階層式選擇 — 類別→口味→包裝→多種包材
 0bde37f feat: 包材庫存支援編輯和刪除功能
 a8676a7 feat: 統計儀表板新增旋轉筒出貨統計卡片與折線圖
@@ -291,8 +300,7 @@ UPDATE branding_styles SET category = 'cake' WHERE category IS NULL;
 
 ### 中優先
 
-1. **包材自動扣減** — 目前包材庫存只有手動入庫，尚未根據訂單自動扣減包材（需結合 product_material_usage 對照表計算）
-2. **Realtime 啟用** — 需在 Supabase Dashboard 手動啟用相關表的 Realtime（`orders`, `order_items`, `inventory`）
+1. **Realtime 啟用** — 需在 Supabase Dashboard 手動啟用相關表的 Realtime（`orders`, `order_items`, `inventory`）
 
 ### 低優先
 
