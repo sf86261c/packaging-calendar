@@ -39,7 +39,7 @@
 
 | 類別 | category | 品項 | 庫存換算 |
 |------|----------|------|---------|
-| 蜂蜜蛋糕（盒） | `cake` | 經典原味+伯爵紅茶、經典原味+茉莉花茶、伯爵紅茶+茉莉花茶 | 1盒 = 2條 cake_bar |
+| 蜂蜜蛋糕（盒） | `cake` | 經典原味+伯爵紅茶、經典原味+茉莉花茶、伯爵紅茶+茉莉花茶、經典原味、伯爵紅茶、茉莉花茶 | 1盒 = 2條 cake_bar |
 | 蛋糕原料（條） | `cake_bar` | 經典原味（條）、伯爵紅茶（條）、茉莉花茶（條） | 庫存追蹤單位 |
 | 旋轉筒 | `tube` | 旋轉筒-經典原味、旋轉筒-伯爵紅茶、旋轉筒-茉莉花茶 | 1筒 = 1條 cake_bar |
 | 旋轉筒包裝 | `tube_pkg` | 四季童話、銀河探險、馬戲團 | 包裝容器庫存追蹤 |
@@ -180,6 +180,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `003_per_category_packaging.sql` | 每類別獨立 packaging/branding 欄位 |
 | `004_tube_rename_cookie_order.sql` | tube_pkg 產品、曲奇排序、order_items.packaging_id、product_material_usage.packaging_style_id |
 | `005_packaging_branding_category.sql` | packaging_styles/branding_styles 加 category 欄位、seed 現有資料對應 |
+| `006_single_flavor_cake.sql` | 蜂蜜蛋糕(盒) 新增單口味品項：經典原味、伯爵紅茶、茉莉花茶 |
 
 ## 檔案結構
 
@@ -215,6 +216,7 @@ packaging-calendar/
 ## Git 提交歷史
 
 ```
+xxxxxxx feat: 蜂蜜蛋糕(盒)新增單口味品項，修正庫存扣減邏輯
 1c77fe4 refactor: 抽出 showMaterialWarnings helper，加註解釐清匹配邏輯
 0f5ec8d feat: 訂單建立/編輯/刪除時自動扣減包材庫存
 1cc69b2 feat: 包裝/烙印款式新增適用類別關聯，移除硬編碼
@@ -283,6 +285,14 @@ UPDATE packaging_styles SET category = 'cake' WHERE name IN ('祝福緞帶(米)'
 UPDATE packaging_styles SET category = 'tube' WHERE name IN ('四季童話', '銀河探險', '馬戲團');
 UPDATE packaging_styles SET category = 'single_cake' WHERE name IN ('愛心', '花園', '小熊');
 UPDATE branding_styles SET category = 'cake' WHERE category IS NULL;
+
+-- === Migration 006: 蜂蜜蛋糕(盒) 新增單口味品項 ===
+
+-- 10. 新增單口味蛋糕（1盒 = 2條同口味 cake_bar）
+INSERT INTO products (category, name, sort_order, is_active) VALUES
+  ('cake', '經典原味', 13, true),
+  ('cake', '伯爵紅茶', 14, true),
+  ('cake', '茉莉花茶', 15, true);
 ```
 
 ## 已知限制

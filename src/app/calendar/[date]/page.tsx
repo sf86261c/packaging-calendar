@@ -224,8 +224,9 @@ export default function DayOrderPage() {
 
       // cake_bar deduction (cake boxes and single cakes consume cake bars)
       if (product.category === 'cake' || product.category === 'single_cake') {
-        const barPerUnit = product.category === 'cake' ? 1 : 0.25
         const flavors = extractFlavors(product.name, product.category)
+        // cake: 1 box = 2 bars total, divided among flavors (dual=1 each, single=2 same)
+        const barPerUnit = product.category === 'cake' ? 2 / flavors.length : 0.25
         for (const flavor of flavors) {
           const bar = cakeBarProducts.find((b: any) => b.name.includes(flavor))
           if (bar) {
