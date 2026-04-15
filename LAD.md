@@ -181,6 +181,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `004_tube_rename_cookie_order.sql` | tube_pkg 產品、曲奇排序、order_items.packaging_id、product_material_usage.packaging_style_id |
 | `005_packaging_branding_category.sql` | packaging_styles/branding_styles 加 category 欄位、seed 現有資料對應 |
 | `006_single_flavor_cake.sql` | 蜂蜜蛋糕(盒) 新增單口味品項：經典原味、伯爵紅茶、茉莉花茶 |
+| `007_fix_settings_rls.sql` | 修復 products/packaging_styles/branding_styles 缺少 INSERT/UPDATE/DELETE RLS 政策 |
 
 ## 檔案結構
 
@@ -293,7 +294,72 @@ INSERT INTO products (category, name, sort_order, is_active) VALUES
   ('cake', '經典原味', 13, true),
   ('cake', '伯爵紅茶', 14, true),
   ('cake', '茉莉花茶', 15, true);
+
+-- === Migration 007: 修復設定頁面 RLS 政策 ===
+
+-- 11. products/packaging_styles/branding_styles 補上 INSERT/UPDATE/DELETE 政策
+CREATE POLICY "Authenticated users can insert products"
+  ON products FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated users can update products"
+  ON products FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated users can delete products"
+  ON products FOR DELETE TO authenticated USING (true);
+
+CREATE POLICY "Authenticated users can insert packaging_styles"
+  ON packaging_styles FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated users can update packaging_styles"
+  ON packaging_styles FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated users can delete packaging_styles"
+  ON packaging_styles FOR DELETE TO authenticated USING (true);
+
+CREATE POLICY "Authenticated users can insert branding_styles"
+  ON branding_styles FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated users can update branding_styles"
+  ON branding_styles FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated users can delete branding_styles"
+  ON branding_styles FOR DELETE TO authenticated USING (true);
 ```
+
+## 效能優化紀錄（2026-04-15）
+
+### 切頁過慢問題排查
+
+症狀：點選側邊導航切換頁面體感延遲 600-1000ms。
+
+根因：
+1. `middleware.ts` 每次導航都呼叫 `supabase.auth.getUser()`（往返 Supabase Auth API 約 200ms）
+2. 所有頁面皆為 `'use client'` + `useEffect` 抓資料，切頁後先 render 空殼才開始 fetch
+3. Realtime subscription 依賴參數（月份/日期）變動時重建 channel，浪費 WS 握手
+4. `calendar/[date]` 每次日期切換都重抓 products/packaging_styles/branding_styles/product_material_usage 等不常變的參考資料
+5. Supabase browser client 每次 render 都 call `createClient()`
+6. 沒有 `loading.tsx`，導航時有短暫白屏
+
+### 已套用的修正
+
+| 修正 | 檔案 | 效果 |
+|------|------|------|
+| Middleware 改為輕量 cookie 檢查 | `src/middleware.ts` | 省下每次切頁 ~200ms Supabase Auth 往返 |
+| Browser client module-level singleton | `src/lib/supabase.ts` | 避免重複建立 GoTrueClient、減少記憶體 |
+| 全域 `loading.tsx` 骨架屏 | `src/app/loading.tsx` | 切頁時立即顯示 spinner，消除白屏 |
+| 拆分 Realtime 與 data fetch useEffect | `calendar/page.tsx`、`inventory/page.tsx` | Channel 只在 mount 時建一次，依賴變動不再重建 |
+| 拆分 static data 只抓一次 | `calendar/[date]/page.tsx` | products/packaging/branding/usages 只在 mount 時抓，不隨日期重抓 |
+| Date filter-bound realtime | `calendar/[date]/page.tsx` | Channel 隨 dateStr 重建但 ref 永遠指向最新 fetchOrders |
+| `next.config.ts` 加優化 | `next.config.ts` | `optimizePackageImports` 涵蓋 @base-ui/react、recharts、lucide-react、date-fns；關 poweredByHeader；啟 compress |
+| matcher 排除靜態資源 | `src/middleware.ts` | API/css/js/字型不再觸發 middleware |
+
+### 預期效果
+
+- 切頁視覺回饋：白屏 → 即時 spinner
+- 後端延遲：每次切頁省下 200ms Auth 往返
+- Realtime 握手：只在 mount 建立一次
+- Bundle 大小：recharts / @base-ui 等套件按需載入
+
+### 取捨說明
+
+Middleware 的驗證從「呼叫 Supabase `getUser()` 驗證 JWT」改為「cookie 存在即放行」：
+- 安全性由 Supabase RLS 在 DB 層把關（已啟用）
+- 若 cookie 被 tamper，瀏覽器端 Supabase SDK 的 API 呼叫仍會失敗（401）
+- 適用內部工具情境；若未來轉對外服務，須恢復 `getUser()`
 
 ## 已知限制
 

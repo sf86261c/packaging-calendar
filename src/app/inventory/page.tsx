@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
 import { format } from 'date-fns'
 import { Loader2, Plus, CalendarDays } from 'lucide-react'
@@ -76,18 +76,20 @@ export default function InventoryPage() {
     setLoading(false)
   }, [asOfDate])
 
-  useEffect(() => {
-    fetchInventory()
+  const fetchRef = useRef(fetchInventory)
+  useEffect(() => { fetchRef.current = fetchInventory }, [fetchInventory])
 
+  useEffect(() => { fetchInventory() }, [fetchInventory])
+
+  useEffect(() => {
     const channel = supabase
       .channel('inventory-updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => {
-        fetchInventory()
+        fetchRef.current()
       })
       .subscribe()
-
     return () => { supabase.removeChannel(channel) }
-  }, [fetchInventory])
+  }, [])
 
   const handleInbound = async () => {
     if (!selectedProduct || !inboundQty) return

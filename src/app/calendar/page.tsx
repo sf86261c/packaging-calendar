@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths, isToday } from 'date-fns'
@@ -34,49 +34,51 @@ export default function CalendarPage() {
     return { allDays, startPadding }
   }, [currentMonth])
 
-  useEffect(() => {
-    async function fetchData() {
-      setLoading(true)
-      const monthStart = format(startOfMonth(currentMonth), 'yyyy-MM-dd')
-      const monthEnd = format(endOfMonth(currentMonth), 'yyyy-MM-dd')
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    const monthStart = format(startOfMonth(currentMonth), 'yyyy-MM-dd')
+    const monthEnd = format(endOfMonth(currentMonth), 'yyyy-MM-dd')
 
-      const { data: orders } = await supabase
-        .from('orders')
-        .select('id, order_date, status, printed, order_items(quantity, product:products(category))')
-        .gte('order_date', monthStart)
-        .lte('order_date', monthEnd)
+    const { data: orders } = await supabase
+      .from('orders')
+      .select('id, order_date, status, printed, order_items(quantity, product:products(category))')
+      .gte('order_date', monthStart)
+      .lte('order_date', monthEnd)
 
-      const map: Record<string, DaySummary> = {}
-      if (orders) {
-        for (const order of orders) {
-          const date = order.order_date
-          if (!map[date]) map[date] = { orders: 0, cakes: 0, cookies: 0, tubes: 0, pending: 0 }
-          map[date].orders++
-          if (!(order as any).printed) map[date].pending++
-          const items = (order as any).order_items || []
-          for (const item of items) {
-            const cat = item.product?.category
-            if (cat === 'cake' || cat === 'single_cake') map[date].cakes += item.quantity
-            else if (cat === 'cookie') map[date].cookies += item.quantity
-            else if (cat === 'tube') map[date].tubes += item.quantity
-          }
+    const map: Record<string, DaySummary> = {}
+    if (orders) {
+      for (const order of orders) {
+        const date = order.order_date
+        if (!map[date]) map[date] = { orders: 0, cakes: 0, cookies: 0, tubes: 0, pending: 0 }
+        map[date].orders++
+        if (!(order as any).printed) map[date].pending++
+        const items = (order as any).order_items || []
+        for (const item of items) {
+          const cat = item.product?.category
+          if (cat === 'cake' || cat === 'single_cake') map[date].cakes += item.quantity
+          else if (cat === 'cookie') map[date].cookies += item.quantity
+          else if (cat === 'tube') map[date].tubes += item.quantity
         }
       }
-      setSummaries(map)
-      setLoading(false)
     }
-    fetchData()
+    setSummaries(map)
+    setLoading(false)
+  }, [currentMonth])
 
-    // Realtime: auto-refresh on order changes
+  const fetchDataRef = useRef(fetchData)
+  useEffect(() => { fetchDataRef.current = fetchData }, [fetchData])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  useEffect(() => {
     const channel = supabase
       .channel('calendar-orders')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-        fetchData()
+        fetchDataRef.current()
       })
       .subscribe()
-
     return () => { supabase.removeChannel(channel) }
-  }, [currentMonth])
+  }, [])
 
   return (
     <div>

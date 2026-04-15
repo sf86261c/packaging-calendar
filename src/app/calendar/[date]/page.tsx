@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { format, parseISO, addDays, subDays } from 'date-fns'
@@ -126,34 +126,40 @@ export default function DayOrderPage() {
     setLoading(false)
   }, [dateStr])
 
-  useEffect(() => {
-    fetchOrders()
-    supabase.from('products').select('*').eq('is_active', true).order('sort_order').then(({ data }) => {
-      if (data) setProducts(data)
-    })
-    supabase.from('packaging_styles').select('*').eq('is_active', true).then(({ data }) => {
-      if (data) setPackagingStyles(data)
-    })
-    supabase.from('branding_styles').select('*').eq('is_active', true).then(({ data }) => {
-      if (data) setBrandingStyles(data)
-    })
-    supabase.from('product_material_usage').select('product_id, material_id, packaging_style_id, quantity_per_unit').then(({ data }) => {
-      if (data) setMaterialUsages(data)
-    })
+  const fetchOrdersRef = useRef(fetchOrders)
+  useEffect(() => { fetchOrdersRef.current = fetchOrders }, [fetchOrders])
 
-    // Realtime: auto-refresh when orders change
+  // Static reference data — only fetch once per mount
+  useEffect(() => {
+    Promise.all([
+      supabase.from('products').select('*').eq('is_active', true).order('sort_order'),
+      supabase.from('packaging_styles').select('*').eq('is_active', true),
+      supabase.from('branding_styles').select('*').eq('is_active', true),
+      supabase.from('product_material_usage').select('product_id, material_id, packaging_style_id, quantity_per_unit'),
+    ]).then(([pr, pk, br, mu]) => {
+      if (pr.data) setProducts(pr.data)
+      if (pk.data) setPackagingStyles(pk.data)
+      if (br.data) setBrandingStyles(br.data)
+      if (mu.data) setMaterialUsages(mu.data)
+    })
+  }, [])
+
+  // Orders depend on dateStr
+  useEffect(() => { fetchOrders() }, [fetchOrders])
+
+  // Realtime subscription rebuilt per dateStr (filter-bound)
+  useEffect(() => {
     const channel = supabase
       .channel(`orders-${dateStr}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `order_date=eq.${dateStr}` }, () => {
-        fetchOrders()
+        fetchOrdersRef.current()
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () => {
-        fetchOrders()
+        fetchOrdersRef.current()
       })
       .subscribe()
-
     return () => { supabase.removeChannel(channel) }
-  }, [fetchOrders, dateStr])
+  }, [dateStr])
 
   useEffect(() => {
     if (!materialWarning) return
