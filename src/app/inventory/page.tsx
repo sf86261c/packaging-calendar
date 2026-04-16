@@ -38,7 +38,7 @@ export default function InventoryPage() {
   const [inboundQty, setInboundQty] = useState('')
   const [inboundNote, setInboundNote] = useState('')
   const [saving, setSaving] = useState(false)
-  const [asOfDate, setAsOfDate] = useState(format(addDays(new Date(), 10), 'yyyy-MM-dd'))
+  const [asOfDate, setAsOfDate] = useState(format(addDays(new Date(), 15), 'yyyy-MM-dd'))
   const [sendingLine, setSendingLine] = useState(false)
   const [lineMessage, setLineMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
 
@@ -51,7 +51,7 @@ export default function InventoryPage() {
       .order('sort_order')
 
     if (prods) {
-      // D+10: filter by inventory date column (order date, not created_at)
+      // D+15: filter by inventory date column (order date, not created_at)
       const { data: invData } = await supabase
         .from('inventory')
         .select('product_id, quantity')
@@ -133,8 +133,8 @@ export default function InventoryPage() {
   }
 
   const today = format(new Date(), 'yyyy-MM-dd')
-  const d10Date = format(addDays(new Date(), 10), 'yyyy-MM-dd')
-  const isD10 = asOfDate === d10Date
+  const d15Date = format(addDays(new Date(), 15), 'yyyy-MM-dd')
+  const isD15 = asOfDate === d15Date
   const isHistorical = asOfDate < today
 
   const cakes = products.filter(p => p.category === 'cake_bar')
@@ -184,11 +184,11 @@ export default function InventoryPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-bold text-gray-900">
-            {isD10 ? 'D+10 預計庫存' : '產品庫存'}
+            {isD15 ? 'D+15 預計庫存' : '產品庫存'}
           </h1>
           {loading && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
           {isHistorical && <Badge variant="outline" className="text-xs">歷史庫存</Badge>}
-          {isD10 && <Badge className="bg-blue-100 text-blue-800 text-xs">預計至 {asOfDate}</Badge>}
+          {isD15 && <Badge className="bg-blue-100 text-blue-800 text-xs">預計至 {asOfDate}</Badge>}
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5">
@@ -199,9 +199,9 @@ export default function InventoryPage() {
               onChange={e => setAsOfDate(e.target.value)}
               className="h-8 w-36 text-sm"
             />
-            {!isD10 && (
-              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setAsOfDate(d10Date)}>
-                D+10
+            {!isD15 && (
+              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setAsOfDate(d15Date)}>
+                D+15
               </Button>
             )}
           </div>
