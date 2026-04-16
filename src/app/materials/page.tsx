@@ -41,6 +41,7 @@ interface Material {
   name: string
   unit: string
   safety_stock: number
+  lead_time_days: number
   is_active: boolean
   stock: number
 }
@@ -77,6 +78,7 @@ export default function MaterialsPage() {
   const [matName, setMatName] = useState('')
   const [matUnit, setMatUnit] = useState('個')
   const [matSafety, setMatSafety] = useState('100')
+  const [matLeadTime, setMatLeadTime] = useState('7')
 
   // Edit material dialog
   const [editOpen, setEditOpen] = useState(false)
@@ -84,6 +86,7 @@ export default function MaterialsPage() {
   const [editName, setEditName] = useState('')
   const [editUnit, setEditUnit] = useState('')
   const [editSafety, setEditSafety] = useState('')
+  const [editLeadTime, setEditLeadTime] = useState('7')
 
   // Inbound dialog
   const [inboundOpen, setInboundOpen] = useState(false)
@@ -108,7 +111,7 @@ export default function MaterialsPage() {
 
     const [matRes, invRes, usageRes, prodRes, pkgRes] = await Promise.all([
       supabase.from('packaging_materials').select('*').order('name'),
-      supabase.from('packaging_material_inventory').select('material_id, quantity').lte('created_at', `${asOfDate}T23:59:59.999Z`),
+      supabase.from('packaging_material_inventory').select('material_id, quantity').lte('date', asOfDate),
       supabase.from('product_material_usage').select('id, product_id, material_id, packaging_style_id, quantity_per_unit, product:products(name, category)'),
       supabase.from('products').select('id, name, category').eq('is_active', true).order('sort_order'),
       supabase.from('packaging_styles').select('*').eq('is_active', true),
@@ -162,15 +165,16 @@ export default function MaterialsPage() {
       name: matName.trim(),
       unit: matUnit,
       safety_stock: parseInt(matSafety) || 100,
+      lead_time_days: parseInt(matLeadTime) || 7,
     })
-    setMatName(''); setMatUnit('個'); setMatSafety('100')
+    setMatName(''); setMatUnit('個'); setMatSafety('100'); setMatLeadTime('7')
     setAddOpen(false)
     setSaving(false)
     fetchData()
   }
 
   const openEditDialog = (m: Material) => {
-    setEditId(m.id); setEditName(m.name); setEditUnit(m.unit); setEditSafety(String(m.safety_stock))
+    setEditId(m.id); setEditName(m.name); setEditUnit(m.unit); setEditSafety(String(m.safety_stock)); setEditLeadTime(String(m.lead_time_days ?? 7))
     setEditOpen(true)
   }
 
@@ -178,7 +182,7 @@ export default function MaterialsPage() {
     if (!editName.trim()) return
     setSaving(true)
     await supabase.from('packaging_materials').update({
-      name: editName.trim(), unit: editUnit, safety_stock: parseInt(editSafety) || 0,
+      name: editName.trim(), unit: editUnit, safety_stock: parseInt(editSafety) || 0, lead_time_days: parseInt(editLeadTime) || 7,
     }).eq('id', editId)
     setEditOpen(false); setSaving(false); fetchData()
   }
@@ -362,6 +366,7 @@ export default function MaterialsPage() {
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{m.name}</span>
                     <div className="flex items-center gap-1">
+                      <Badge variant="outline" className="text-[10px] text-gray-500">D+{m.lead_time_days ?? 7}</Badge>
                       {isLow && <Badge variant="destructive" className="text-xs">低庫存</Badge>}
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-blue-600" onClick={() => openEditDialog(m)}><Pencil className="h-3 w-3" /></Button>
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-orange-600" onClick={() => handleToggleActive(m.id, m.is_active)} title="停用"><Ban className="h-3 w-3" /></Button>
@@ -468,6 +473,11 @@ export default function MaterialsPage() {
                 <Input type="number" min={0} value={matSafety} onChange={e => setMatSafety(e.target.value)} />
               </div>
             </div>
+            <div>
+              <Label>到貨時間（天）</Label>
+              <Input type="number" min={1} value={matLeadTime} onChange={e => setMatLeadTime(e.target.value)} placeholder="7" />
+              <p className="mt-1 text-xs text-gray-400">叫貨後幾天到貨（D+?），用於判斷是否需發送叫貨通知</p>
+            </div>
             <Button className="w-full" onClick={handleAddMaterial} disabled={saving || !matName.trim()}>
               {saving ? '儲存中...' : '新增包材'}
             </Button>
@@ -503,6 +513,11 @@ export default function MaterialsPage() {
                 <Label>安全庫存</Label>
                 <Input type="number" min={0} value={editSafety} onChange={e => setEditSafety(e.target.value)} />
               </div>
+            </div>
+            <div>
+              <Label>到貨時間（天）</Label>
+              <Input type="number" min={1} value={editLeadTime} onChange={e => setEditLeadTime(e.target.value)} />
+              <p className="mt-1 text-xs text-gray-400">叫貨後幾天到貨（D+?）</p>
             </div>
             <Button className="w-full" onClick={handleEditMaterial} disabled={saving || !editName.trim()}>
               {saving ? '儲存中...' : '儲存變更'}

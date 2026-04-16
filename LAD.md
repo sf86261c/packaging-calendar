@@ -113,13 +113,19 @@
 - 旋轉筒包裝（tube_pkg）：四季童話/銀河探險/馬戲團
 - **D+10 預計庫存**：預設顯示未來 10 天後的預計庫存餘額（依訂單日期篩選 inventory.date）
 - **日期選擇器**：可切換至任意日期查看庫存，預設 D+10；可點「D+10」按鈕快速回到預設
-- **LINE 叫貨通知**：右上角「叫貨通知」按鈕，自動收集低於安全庫存的產品，透過 LINE Messaging API 推播通知指定對象
+- **LINE 叫貨通知**：
+  - 右上角「叫貨通知」按鈕（手動測試用），呼叫 `/api/line-notify` 統一端點
+  - **每日 9:00 AM 自動檢測**（Vercel Cron，UTC 1:00 = 台灣 9:00）
+  - 產品檢查：D+15 的 cake_bar（經典原味/伯爵紅茶/茉莉花茶）+ tube_pkg 庫存
+  - 包材檢查：每種包材依各自的 D+lead_time_days，若預計到貨日庫存低於安全庫存才通知
+  - 新增包材自動適用（查全部 active materials）
 - 安全庫存警示 + 進度條
 - Realtime 即時同步
 
 ### 包材庫存
 
-- 包材品項 CRUD（名稱、單位、安全庫存）+ 編輯/刪除/停用
+- 包材品項 CRUD（名稱、單位、安全庫存、**到貨時間 D+?**）+ 編輯/刪除/停用
+- **到貨時間（lead_time_days）**：每種包材可設定叫貨後幾天到貨，用於叫貨通知判斷
 - 入庫紀錄管理
 - **階層式用量對照**：產品類別 → 口味 → 包裝款式 → 多種包材組成
 - 用量對照分組顯示（按產品+包裝分組）
@@ -186,6 +192,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `006_single_flavor_cake.sql` | 蜂蜜蛋糕(盒) 新增單口味品項：經典原味、伯爵紅茶、茉莉花茶 |
 | `007_fix_settings_rls.sql` | 修復 products/packaging_styles/branding_styles 缺少 INSERT/UPDATE/DELETE RLS 政策 |
 | `008_inventory_date_backfill.sql` | 回填 inventory/packaging_material_inventory 的 date 欄位為對應訂單的 order_date |
+| `009_material_lead_time.sql` | packaging_materials 新增 lead_time_days 欄位（預設 7 天） |
 
 ## 檔案結構
 
@@ -340,6 +347,12 @@ SET date = o.order_date
 FROM orders o
 WHERE pmi.reference_note = 'order:' || o.id::text
   AND pmi.type = 'outbound';
+
+-- === Migration 009: 包材到貨時間 ===
+
+-- 14. packaging_materials 新增到貨時間欄位
+ALTER TABLE packaging_materials
+  ADD COLUMN IF NOT EXISTS lead_time_days INT NOT NULL DEFAULT 7;
 ```
 
 ## 效能優化紀錄（2026-04-15）
@@ -414,8 +427,9 @@ Middleware 的驗證從「呼叫 Supabase `getUser()` 驗證 JWT」改為「cook
 - **GitHub User**: sf86261c
 - **Node.js**: v24.14.0
 - **Next.js**: 16.2.2
-- **LINE_CHANNEL_ACCESS_TOKEN**: LINE Bot Channel Access Token（`.env.local`，需自行設定）
-- **LINE_TARGET_ID**: LINE 推播目標的 User ID 或 Group ID（`.env.local`，需自行設定）
+- **SUPABASE_SERVICE_ROLE_KEY**: Supabase Service Role Key（`.env.local`，用於 API route 伺服器端查詢）
+- **LINE_CHANNEL_ACCESS_TOKEN**: LINE Bot Channel Access Token（`.env.local`）
+- **LINE_TARGET_ID**: LINE 推播目標的 User ID 或 Group ID（`.env.local`）
 
 ## 部署流程
 

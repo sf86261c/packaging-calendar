@@ -113,33 +113,16 @@ export default function InventoryPage() {
   }
 
   const handleLineNotify = async () => {
-    const lowStockProducts = products.filter(p => {
-      const safety = SAFETY_STOCK[p.category] || 100
-      return p.stock < safety
-    })
-
-    if (lowStockProducts.length === 0) {
-      setLineMessage({ type: 'info', text: '目前所有產品庫存充足，無需叫貨' })
-      return
-    }
-
     setSendingLine(true)
     try {
-      const res = await fetch('/api/line-notify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          products: lowStockProducts.map(p => ({
-            name: p.name,
-            stock: p.stock,
-            safetyStock: SAFETY_STOCK[p.category] || 100,
-          })),
-        }),
-      })
-
+      const res = await fetch('/api/line-notify')
       const data = await res.json()
       if (res.ok) {
-        setLineMessage({ type: 'success', text: `已發送叫貨通知（${lowStockProducts.length} 項產品）` })
+        if (data.notified?.products === 0 && data.notified?.materials === 0) {
+          setLineMessage({ type: 'info', text: '所有庫存充足，無需叫貨' })
+        } else {
+          setLineMessage({ type: 'success', text: `已發送叫貨通知（產品 ${data.notified?.products ?? 0} 項、包材 ${data.notified?.materials ?? 0} 項）` })
+        }
       } else {
         setLineMessage({ type: 'error', text: data.error || '發送失敗' })
       }
