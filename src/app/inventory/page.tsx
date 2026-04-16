@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
-import { format } from 'date-fns'
-import { Loader2, Plus, CalendarDays } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { format, addDays } from 'date-fns'
+import { Loader2, Plus, CalendarDays, Send } from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -38,7 +38,9 @@ export default function InventoryPage() {
   const [inboundQty, setInboundQty] = useState('')
   const [inboundNote, setInboundNote] = useState('')
   const [saving, setSaving] = useState(false)
-  const [asOfDate, setAsOfDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [asOfDate, setAsOfDate] = useState(format(addDays(new Date(), 10), 'yyyy-MM-dd'))
+  const [sendingLine, setSendingLine] = useState(false)
+  const [lineMessage, setLineMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
 
   const fetchInventory = useCallback(async () => {
     setLoading(true)
@@ -49,15 +51,11 @@ export default function InventoryPage() {
       .order('sort_order')
 
     if (prods) {
-      // Get inventory totals per product, filtered by date
-      let query = supabase
+      // D+10: filter by inventory date column (order date, not created_at)
+      const { data: invData } = await supabase
         .from('inventory')
         .select('product_id, quantity')
-
-      // Filter: only include records up to the selected date
-      query = query.lte('created_at', `${asOfDate}T23:59:59.999Z`)
-
-      const { data: invData } = await query
+        .lte('date', asOfDate)
 
       const stockMap: Record<string, number> = {}
       if (invData) {
@@ -91,6 +89,12 @@ export default function InventoryPage() {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
+  useEffect(() => {
+    if (!lineMessage) return
+    const timer = setTimeout(() => setLineMessage(null), 5000)
+    return () => clearTimeout(timer)
+  }, [lineMessage])
+
   const handleInbound = async () => {
     if (!selectedProduct || !inboundQty) return
     setSaving(true)
@@ -108,7 +112,47 @@ export default function InventoryPage() {
     fetchInventory()
   }
 
-  const isToday = asOfDate === format(new Date(), 'yyyy-MM-dd')
+  const handleLineNotify = async () => {
+    const lowStockProducts = products.filter(p => {
+      const safety = SAFETY_STOCK[p.category] || 100
+      return p.stock < safety
+    })
+
+    if (lowStockProducts.length === 0) {
+      setLineMessage({ type: 'info', text: '目前所有產品庫存充足，無需叫貨' })
+      return
+    }
+
+    setSendingLine(true)
+    try {
+      const res = await fetch('/api/line-notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          products: lowStockProducts.map(p => ({
+            name: p.name,
+            stock: p.stock,
+            safetyStock: SAFETY_STOCK[p.category] || 100,
+          })),
+        }),
+      })
+
+      const data = await res.json()
+      if (res.ok) {
+        setLineMessage({ type: 'success', text: `已發送叫貨通知（${lowStockProducts.length} 項產品）` })
+      } else {
+        setLineMessage({ type: 'error', text: data.error || '發送失敗' })
+      }
+    } catch {
+      setLineMessage({ type: 'error', text: '網路錯誤，請稍後再試' })
+    }
+    setSendingLine(false)
+  }
+
+  const today = format(new Date(), 'yyyy-MM-dd')
+  const d10Date = format(addDays(new Date(), 10), 'yyyy-MM-dd')
+  const isD10 = asOfDate === d10Date
+  const isHistorical = asOfDate < today
 
   const cakes = products.filter(p => p.category === 'cake_bar')
   const cookies = products.filter(p => p.category === 'cookie')
@@ -141,11 +185,27 @@ export default function InventoryPage() {
 
   return (
     <div>
+      {lineMessage && (
+        <div className={`mb-4 rounded-lg border p-3 text-sm ${
+          lineMessage.type === 'success' ? 'border-green-200 bg-green-50 text-green-800' :
+          lineMessage.type === 'error' ? 'border-red-200 bg-red-50 text-red-800' :
+          'border-blue-200 bg-blue-50 text-blue-800'
+        }`}>
+          <div className="flex items-center justify-between">
+            <span>{lineMessage.text}</span>
+            <button onClick={() => setLineMessage(null)} className="ml-2 opacity-60 hover:opacity-100">✕</button>
+          </div>
+        </div>
+      )}
+
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-bold text-gray-900">產品庫存</h1>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {isD10 ? 'D+10 預計庫存' : '產品庫存'}
+          </h1>
           {loading && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
-          {!isToday && <Badge variant="outline" className="text-xs">歷史庫存</Badge>}
+          {isHistorical && <Badge variant="outline" className="text-xs">歷史庫存</Badge>}
+          {isD10 && <Badge className="bg-blue-100 text-blue-800 text-xs">預計至 {asOfDate}</Badge>}
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5">
@@ -156,12 +216,22 @@ export default function InventoryPage() {
               onChange={e => setAsOfDate(e.target.value)}
               className="h-8 w-36 text-sm"
             />
-            {!isToday && (
-              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setAsOfDate(format(new Date(), 'yyyy-MM-dd'))}>
-                今天
+            {!isD10 && (
+              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setAsOfDate(d10Date)}>
+                D+10
               </Button>
             )}
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleLineNotify}
+            disabled={sendingLine || loading}
+            className="h-8 text-xs border-orange-300 text-orange-700 hover:bg-orange-50"
+          >
+            {sendingLine ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Send className="mr-1 h-3 w-3" />}
+            叫貨通知
+          </Button>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <Button size="sm" onClick={() => setDialogOpen(true)}>
               <Plus className="mr-1 h-4 w-4" /> 入庫

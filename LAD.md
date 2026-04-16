@@ -111,7 +111,9 @@
 - 蛋糕條（cake_bar）：經典原味/伯爵紅茶/茉莉花茶
 - 曲奇（cookie）：顯示順序 綜合白→綜合粉→綜合藍→原味白→可可粉→伯爵藍
 - 旋轉筒包裝（tube_pkg）：四季童話/銀河探險/馬戲團
-- **日期選擇器**：可查看任意日期截止的歷史庫存餘額
+- **D+10 預計庫存**：預設顯示未來 10 天後的預計庫存餘額（依訂單日期篩選 inventory.date）
+- **日期選擇器**：可切換至任意日期查看庫存，預設 D+10；可點「D+10」按鈕快速回到預設
+- **LINE 叫貨通知**：右上角「叫貨通知」按鈕，自動收集低於安全庫存的產品，透過 LINE Messaging API 推播通知指定對象
 - 安全庫存警示 + 進度條
 - Realtime 即時同步
 
@@ -163,6 +165,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 
 - 訂單建立時：根據品項自動插入 `inventory` 記錄（type='outbound', quantity=負數）
 - `reference_note` 格式：`order:{orderId}`，用於追蹤和回沖
+- **date 欄位設為訂單日期**：庫存記錄的 `date` 設為 `order_date`（非 CURRENT_DATE），支援 D+10 日期篩選
 - 刪除/編輯訂單時：先刪除對應 reference_note 的記錄，再重新計算
 - 旋轉筒雙重扣減：cake_bar（口味）+ tube_pkg（包裝款式）
 
@@ -182,6 +185,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `005_packaging_branding_category.sql` | packaging_styles/branding_styles 加 category 欄位、seed 現有資料對應 |
 | `006_single_flavor_cake.sql` | 蜂蜜蛋糕(盒) 新增單口味品項：經典原味、伯爵紅茶、茉莉花茶 |
 | `007_fix_settings_rls.sql` | 修復 products/packaging_styles/branding_styles 缺少 INSERT/UPDATE/DELETE RLS 政策 |
+| `008_inventory_date_backfill.sql` | 回填 inventory/packaging_material_inventory 的 date 欄位為對應訂單的 order_date |
 
 ## 檔案結構
 
@@ -197,9 +201,11 @@ packaging-calendar/
 │   │   │   └── [date]/page.tsx     # 日訂單管理 (CRUD+庫存+匯出+Realtime)
 │   │   ├── search/page.tsx         # 客戶搜尋
 │   │   ├── dashboard/page.tsx      # 統計儀表板 (Recharts, 5卡片+4圖表)
-│   │   ├── inventory/page.tsx      # 產品庫存 (Realtime+日期查詢)
+│   │   ├── inventory/page.tsx      # 產品庫存 (D+10+LINE叫貨+Realtime)
 │   │   ├── materials/page.tsx      # 包材庫存 (CRUD+階層式用量對照+日期查詢)
-│   │   └── settings/page.tsx       # 設定 (CRUD)
+│   │   ├── settings/page.tsx       # 設定 (CRUD)
+│   │   └── api/
+│   │       └── line-notify/route.ts # LINE 叫貨通知 API
 │   ├── components/
 │   │   ├── app-shell.tsx           # 側邊導航 + 頂部欄
 │   │   └── ui/                     # shadcn/ui 元件 (20+, 基於 @base-ui/react)
@@ -209,8 +215,8 @@ packaging-calendar/
 │   │   ├── types.ts                # TypeScript 型別定義
 │   │   └── utils.ts                # 工具函數
 │   └── middleware.ts               # Auth 保護路由
-├── supabase/migrations/            # DB migration SQL (4 檔)
-├── .env.local                      # Supabase URL + Key（不進 git）
+├── supabase/migrations/            # DB migration SQL (8 檔)
+├── .env.local                      # Supabase URL + Key + LINE Token（不進 git）
 └── package.json
 ```
 
@@ -318,6 +324,22 @@ CREATE POLICY "Authenticated users can update branding_styles"
   ON branding_styles FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Authenticated users can delete branding_styles"
   ON branding_styles FOR DELETE TO authenticated USING (true);
+
+-- === Migration 008: 回填庫存記錄日期 ===
+
+-- 12. 將 inventory 中由訂單產生的記錄，date 更正為對應訂單的 order_date
+UPDATE inventory i
+SET date = o.order_date
+FROM orders o
+WHERE i.reference_note = 'order:' || o.id::text
+  AND i.type = 'outbound';
+
+-- 13. 將 packaging_material_inventory 中由訂單產生的記錄，date 更正為對應訂單的 order_date
+UPDATE packaging_material_inventory pmi
+SET date = o.order_date
+FROM orders o
+WHERE pmi.reference_note = 'order:' || o.id::text
+  AND pmi.type = 'outbound';
 ```
 
 ## 效能優化紀錄（2026-04-15）
@@ -392,6 +414,8 @@ Middleware 的驗證從「呼叫 Supabase `getUser()` 驗證 JWT」改為「cook
 - **GitHub User**: sf86261c
 - **Node.js**: v24.14.0
 - **Next.js**: 16.2.2
+- **LINE_CHANNEL_ACCESS_TOKEN**: LINE Bot Channel Access Token（`.env.local`，需自行設定）
+- **LINE_TARGET_ID**: LINE 推播目標的 User ID 或 Group ID（`.env.local`，需自行設定）
 
 ## 部署流程
 

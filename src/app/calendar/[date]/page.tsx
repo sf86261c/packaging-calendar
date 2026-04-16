@@ -269,11 +269,12 @@ export default function DayOrderPage() {
     return deductions
   }
 
-  const applyDeductions = async (orderId: string, deductions: Record<string, number>) => {
+  const applyDeductions = async (orderId: string, deductions: Record<string, number>, orderDate: string) => {
     const records = Object.entries(deductions)
       .filter(([, qty]) => qty > 0)
       .map(([productId, qty]) => ({
         product_id: productId,
+        date: orderDate,
         type: 'outbound' as const,
         quantity: -qty,
         reference_note: `order:${orderId}`,
@@ -331,11 +332,12 @@ export default function DayOrderPage() {
     return { deductions, missingCombos }
   }
 
-  const applyMaterialDeductions = async (orderId: string, deductions: Record<string, number>) => {
+  const applyMaterialDeductions = async (orderId: string, deductions: Record<string, number>, orderDate: string) => {
     const records = Object.entries(deductions)
       .filter(([, qty]) => qty > 0)
       .map(([materialId, qty]) => ({
         material_id: materialId,
+        date: orderDate,
         type: 'outbound' as const,
         quantity: -Math.round(qty * 100) / 100,
         reference_note: `order:${orderId}`,
@@ -399,7 +401,7 @@ export default function DayOrderPage() {
       // Product inventory
       await reverseDeductions(editingOrderId)
       const deductions = calculateDeductions(itemEntries, formTubePackaging || undefined)
-      await applyDeductions(editingOrderId, deductions)
+      await applyDeductions(editingOrderId, deductions, dateStr)
       // Packaging material inventory
       await reverseMaterialDeductions(editingOrderId)
       const matResult = calculateMaterialDeductions(
@@ -408,7 +410,7 @@ export default function DayOrderPage() {
         formTubePackaging || undefined,
         formSingleCakePackaging,
       )
-      await applyMaterialDeductions(editingOrderId, matResult.deductions)
+      await applyMaterialDeductions(editingOrderId, matResult.deductions, dateStr)
       showMaterialWarnings(matResult.missingCombos)
     } else {
       // ── Add mode ──
@@ -424,7 +426,7 @@ export default function DayOrderPage() {
         }
         // Product inventory
         const deductions = calculateDeductions(itemEntries, formTubePackaging || undefined)
-        await applyDeductions(order.id, deductions)
+        await applyDeductions(order.id, deductions, dateStr)
         // Packaging material inventory
         const matResult = calculateMaterialDeductions(
           itemEntries,
@@ -432,7 +434,7 @@ export default function DayOrderPage() {
           formTubePackaging || undefined,
           formSingleCakePackaging,
         )
-        await applyMaterialDeductions(order.id, matResult.deductions)
+        await applyMaterialDeductions(order.id, matResult.deductions, dateStr)
         showMaterialWarnings(matResult.missingCombos)
       }
     }
