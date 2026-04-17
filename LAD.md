@@ -28,12 +28,12 @@
 |------|------|------|------|
 | 登入/註冊 | `/login` | ✅ 完成 | Supabase Auth，email/password |
 | 月曆視圖 | `/calendar` | ✅ 完成 | 月份切換、每日訂單摘要、Realtime、響應式 |
-| 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除、庫存扣減、CSV匯出、Realtime |
+| 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除、**資料驅動庫存扣減（product_recipe）**、CSV匯出、Realtime、**今日試吃/耗損 CRUD** |
 | 客戶搜尋 | `/search` | ✅ 完成 | 即時搜尋(ilike)、點擊跳轉日期頁 |
-| 統計儀表板 | `/dashboard` | ✅ 完成 | 5 統計卡片 + 4 Recharts 圖表 |
+| 統計儀表板 | `/dashboard` | ✅ 完成 | 6 統計卡片 + 5 Recharts 圖表（含試吃統計） |
 | 產品庫存 | `/inventory` | ✅ 完成 | 蛋糕條/曲奇/旋轉筒包裝庫存、日期查詢、Realtime |
 | 包材庫存 | `/materials` | ✅ 完成 | 包材 CRUD、編輯/刪除、入庫、階層式用量對照、日期查詢 |
-| 設定 | `/settings` | ✅ 完成 | 產品/包裝/烙印 CRUD（新增/行內編輯/停用）、包裝/烙印可選擇適用類別 |
+| 設定 | `/settings` | ✅ 完成 | 產品/包裝/烙印 CRUD、**新增產品可同步設定原料配方與包材消耗**、每項產品可📋編輯配方 |
 
 ### 產品結構
 
@@ -82,6 +82,17 @@
 - **CSV 匯出**：日訂單頁面「匯出」按鈕
 - **狀態欄**：自由輸入框
 - **列印勾選**：checkbox，勾選後整列背景變黃色
+
+### 試吃/耗損功能（非訂單庫存扣減）
+
+- **類型**：`sample`（試吃）/ `waste`（耗損）分開記錄，可分別做報表分析
+- **扣減模式**：
+  - 「扣成品」→ 透過 `product_recipe` 展開為原料扣減 + 透過 `product_material_usage` 展開為包材扣減
+  - 「扣原料」→ 直接扣 `cake_bar` / `tube_pkg` 產品庫存
+  - 包材耗損暫不支援（未來視需求在 `/materials` 頁面另開入口）
+- **資料表**：`stock_adjustments`（父：date, adjustment_type, note）+ `stock_adjustment_items`（子：product_id, quantity, deduct_mode）
+- **reference_note 格式**：`adjust:${adjustmentId}`
+- 日頁面（`/calendar/[date]`）右上角「🍰 今日試吃/耗損」按鈕開啟 Dialog，列表顯示於訂單卡片下方，支援編輯/刪除
 
 ### Realtime 同步
 
@@ -157,6 +168,13 @@ orders           — 訂單 (order_date, customer_name, status, batch_info, prin
 order_items      — 訂單品項 (order_id, product_id, quantity, packaging_id)
                    packaging_id: 單入蛋糕 per-item 包裝
 inventory        — 庫存紀錄 (product_id, date, type, quantity, reference_note)
+product_recipe    — 原料配方 BOM (product_id, ingredient_id, quantity_per_unit)
+                   ingredient_id 指向 cake_bar 或 tube_pkg 類別的 product
+                   注意：cake_bar 名稱含「（條）」後綴，比對時需 REPLACE 剝除
+stock_adjustments — 試吃/耗損 (date, adjustment_type, note)
+                   adjustment_type: sample / waste
+stock_adjustment_items — 扣減項目 (adjustment_id, product_id, quantity, deduct_mode)
+                   deduct_mode: finished (透過 recipe 展開) / ingredient (直接扣)
 ```
 
 ### 包材相關表
@@ -169,11 +187,15 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 
 ### 庫存扣減機制
 
-- 訂單建立時：根據品項自動插入 `inventory` 記錄（type='outbound', quantity=負數）
-- `reference_note` 格式：`order:{orderId}`，用於追蹤和回沖
-- **date 欄位設為訂單日期**：庫存記錄的 `date` 設為 `order_date`（非 CURRENT_DATE），支援 D+10 日期篩選
-- 刪除/編輯訂單時：先刪除對應 reference_note 的記錄，再重新計算
-- 旋轉筒雙重扣減：cake_bar（口味）+ tube_pkg（包裝款式）
+- **資料驅動**：訂單 / 試吃 / 耗損的「扣成品」模式透過 `product_recipe` 展開為原料扣減、透過 `product_material_usage` 展開為包材扣減
+- 共用 helper 在 `src/lib/stock.ts`：`calculateIngredientDeductions`、`calculateMaterialDeductions`、`applyIngredientDeductions`、`applyMaterialDeductions`、`reverseIngredientDeductions`、`reverseMaterialDeductions`、`deductDirectIngredient`
+- 訂單建立時：依 order_items 對每個產品查 recipe → insert `inventory` 記錄（type='outbound', quantity=負數）
+- `reference_note` 格式：
+  - 訂單：`order:${orderId}`
+  - 試吃/耗損：`adjust:${adjustmentId}`
+- `date` 欄位：訂單為 `order_date`；試吃/耗損為該筆 adjustment 的 `date`
+- 刪除/編輯時：先刪除對應 reference_note 的記錄，再重新計算
+- **tube_pkg 扣減例外**：保留硬編碼「按訂單 `tube_packaging_id` 對應包裝款式名稱、扣同名 tube_pkg 產品」邏輯（per-packaging 屬性不進 recipe）
 
 ### RLS 政策
 
@@ -193,6 +215,8 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `007_fix_settings_rls.sql` | 修復 products/packaging_styles/branding_styles 缺少 INSERT/UPDATE/DELETE RLS 政策 |
 | `008_inventory_date_backfill.sql` | 回填 inventory/packaging_material_inventory 的 date 欄位為對應訂單的 order_date |
 | `009_material_lead_time.sql` | packaging_materials 新增 lead_time_days 欄位（預設 7 天） |
+| `010_product_recipe.sql` | 新增 product_recipe 表、seed 15 筆既有產品配方（6 cake + 3 tube + 3 single_cake，處理「（條）」後綴匹配） |
+| `011_stock_adjustments.sql` | 新增 stock_adjustments + stock_adjustment_items 父子表 + RLS + CHECK constraints |
 
 ## 檔案結構
 
@@ -353,6 +377,15 @@ WHERE pmi.reference_note = 'order:' || o.id::text
 -- 14. packaging_materials 新增到貨時間欄位
 ALTER TABLE packaging_materials
   ADD COLUMN IF NOT EXISTS lead_time_days INT NOT NULL DEFAULT 7;
+
+-- === Migration 010: product_recipe ===
+-- (完整 SQL 見 supabase/migrations/010_product_recipe.sql)
+-- 要點：建 product_recipe 表 + RLS + seed 15 筆既有配方
+--       注意 cake_bar 名稱含「（條）」後綴，seed SQL 用 REPLACE 剝除比對
+
+-- === Migration 011: stock_adjustments ===
+-- (完整 SQL 見 supabase/migrations/011_stock_adjustments.sql)
+-- 要點：建 stock_adjustments 父子表 + RLS + CHECK constraints
 ```
 
 ## 效能優化紀錄（2026-04-15）
