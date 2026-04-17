@@ -21,7 +21,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import type { ProductRecipe, ProductMaterialUsage } from '@/lib/types'
+import type { ProductRecipe, ProductMaterialUsage, StockAdjustment, StockAdjustmentItem } from '@/lib/types'
 import {
   calculateIngredientDeductions,
   calculateMaterialDeductions as calcMaterialDeductionsHelper,
@@ -29,7 +29,10 @@ import {
   applyMaterialDeductions as applyMaterialDeductionsHelper,
   reverseIngredientDeductions as reverseIngredientDeductionsHelper,
   reverseMaterialDeductions as reverseMaterialDeductionsHelper,
+  deductDirectIngredient,
 } from '@/lib/stock'
+import { StockAdjustmentDialog } from '@/components/stock-adjustment-dialog'
+import type { AdjustmentInput } from '@/components/stock-adjustment-dialog'
 
 interface OrderRow {
   id: string
@@ -78,6 +81,14 @@ export default function DayOrderPage() {
   const [formSingleCakePackaging, setFormSingleCakePackaging] = useState<Record<string, string>>({})
   const [formSingleCakeBranding, setFormSingleCakeBranding] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // Adjustment state
+  const [adjustments, setAdjustments] = useState<(StockAdjustment & { items: StockAdjustmentItem[] })[]>([])
+  const [adjustmentDialogOpen, setAdjustmentDialogOpen] = useState(false)
+  const [editingAdjustment, setEditingAdjustment] = useState<{
+    id: string
+    value: AdjustmentInput
+  } | null>(null)
 
   const fetchOrders = useCallback(async () => {
     setLoading(true)
@@ -129,6 +140,27 @@ export default function DayOrderPage() {
   const fetchOrdersRef = useRef(fetchOrders)
   useEffect(() => { fetchOrdersRef.current = fetchOrders }, [fetchOrders])
 
+  const fetchAdjustments = useCallback(async () => {
+    const { data } = await supabase
+      .from('stock_adjustments')
+      .select(`
+        id, date, adjustment_type, note, created_at,
+        stock_adjustment_items (id, adjustment_id, product_id, quantity, deduct_mode)
+      `)
+      .eq('date', dateStr)
+      .order('created_at', { ascending: false })
+
+    if (data) {
+      type Row = StockAdjustment & { stock_adjustment_items: StockAdjustmentItem[] }
+      setAdjustments(
+        (data as Row[]).map((a) => ({
+          ...a,
+          items: a.stock_adjustment_items,
+        })),
+      )
+    }
+  }, [dateStr])
+
   // Static reference data — only fetch once per mount
   useEffect(() => {
     Promise.all([
@@ -146,8 +178,11 @@ export default function DayOrderPage() {
     })
   }, [])
 
-  // Orders depend on dateStr
-  useEffect(() => { fetchOrders() }, [fetchOrders])
+  // Orders + adjustments depend on dateStr
+  useEffect(() => {
+    fetchOrders()
+    fetchAdjustments()
+  }, [fetchOrders, fetchAdjustments])
 
   // Realtime subscription rebuilt per dateStr (filter-bound)
   useEffect(() => {
@@ -392,6 +427,105 @@ export default function DayOrderPage() {
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, printed } : o))
   }
 
+  // ─── Adjustment handlers ────────────────────────────
+
+  const handleSaveAdjustment = async (value: AdjustmentInput) => {
+    // 編輯模式：先反轉舊扣減 + 刪舊 items
+    if (editingAdjustment) {
+      const oldRef = `adjust:${editingAdjustment.id}`
+      await reverseIngredientDeductionsHelper(supabase, oldRef)
+      await reverseMaterialDeductionsHelper(supabase, oldRef)
+      await supabase.from('stock_adjustment_items').delete().eq('adjustment_id', editingAdjustment.id)
+      await supabase
+        .from('stock_adjustments')
+        .update({
+          adjustment_type: value.adjustmentType,
+          note: value.note || null,
+        })
+        .eq('id', editingAdjustment.id)
+    }
+
+    // 取得 adjustmentId（新增或編輯）
+    let adjustmentId: string
+    if (editingAdjustment) {
+      adjustmentId = editingAdjustment.id
+    } else {
+      const { data, error } = await supabase
+        .from('stock_adjustments')
+        .insert({
+          date: dateStr,
+          adjustment_type: value.adjustmentType,
+          note: value.note || null,
+        })
+        .select()
+        .single()
+      if (error || !data) throw new Error(error?.message ?? 'insert adjustment failed')
+      adjustmentId = data.id
+    }
+
+    // Insert items
+    const itemRows = value.items.map((i) => ({
+      adjustment_id: adjustmentId,
+      product_id: i.productId,
+      quantity: parseFloat(i.quantity),
+      deduct_mode: i.deductMode,
+    }))
+    const { error: itemErr } = await supabase.from('stock_adjustment_items').insert(itemRows)
+    if (itemErr) throw new Error(itemErr.message)
+
+    // 扣減 inventory
+    const referenceNote = `adjust:${adjustmentId}`
+    const finishedEntries: [string, number][] = []
+    for (const i of value.items) {
+      if (i.deductMode === 'finished') {
+        finishedEntries.push([i.productId, parseFloat(i.quantity)])
+      } else {
+        await deductDirectIngredient(supabase, i.productId, parseFloat(i.quantity), referenceNote, dateStr)
+      }
+    }
+
+    if (finishedEntries.length > 0) {
+      const ingredientDeductions = calculateIngredientDeductions(finishedEntries, recipes)
+      await applyIngredientDeductionsHelper(supabase, ingredientDeductions, referenceNote, dateStr)
+
+      const { deductions: materialDeductions } = calcMaterialDeductionsHelper(
+        finishedEntries,
+        products,
+        materialUsages,
+        () => null,
+        (id) => packagingStyles.find((ps) => ps.id === id)?.name ?? null,
+      )
+      await applyMaterialDeductionsHelper(supabase, materialDeductions, referenceNote, dateStr)
+    }
+
+    setEditingAdjustment(null)
+    fetchAdjustments()
+  }
+
+  const handleDeleteAdjustment = async (id: string) => {
+    if (!confirm('確定刪除此筆試吃/耗損？相關庫存扣減會一併回沖。')) return
+    await reverseIngredientDeductionsHelper(supabase, `adjust:${id}`)
+    await reverseMaterialDeductionsHelper(supabase, `adjust:${id}`)
+    await supabase.from('stock_adjustments').delete().eq('id', id)
+    fetchAdjustments()
+  }
+
+  const handleEditAdjustment = (a: StockAdjustment & { items: StockAdjustmentItem[] }) => {
+    setEditingAdjustment({
+      id: a.id,
+      value: {
+        adjustmentType: a.adjustment_type,
+        note: a.note ?? '',
+        items: a.items.map((item) => ({
+          productId: item.product_id,
+          quantity: String(item.quantity),
+          deductMode: item.deduct_mode,
+        })),
+      },
+    })
+    setAdjustmentDialogOpen(true)
+  }
+
   // ─── Derived data ───────────────────────────────────
 
   const weekday = format(date, 'EEEE', { locale: zhTW })
@@ -513,6 +647,16 @@ export default function DayOrderPage() {
               <Button size="sm" onClick={openNewDialog}>
                 <Plus className="mr-1 h-4 w-4" /> 新增訂單
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setEditingAdjustment(null)
+                  setAdjustmentDialogOpen(true)
+                }}
+              >
+                🍰 今日試吃/耗損
+              </Button>
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -613,6 +757,41 @@ export default function DayOrderPage() {
           </Card>
         </div>
       </div>
+
+      {adjustments.length > 0 && (
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle className="text-base">今日試吃 / 耗損</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {adjustments.map((a) => (
+              <div key={a.id} className="flex items-center justify-between rounded-lg border p-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={a.adjustment_type === 'sample' ? 'default' : 'destructive'}>
+                    {a.adjustment_type === 'sample' ? '試吃' : '耗損'}
+                  </Badge>
+                  <span className="text-gray-700">
+                    {a.items.map((it) => {
+                      const product = products.find((p: any) => p.id === it.product_id)
+                      const modeLabel = it.deduct_mode === 'finished' ? '成品' : '原料'
+                      return `${product?.name ?? '?'} × ${it.quantity} (${modeLabel})`
+                    }).join('、')}
+                  </span>
+                  {a.note && <span className="text-xs text-gray-400">— {a.note}</span>}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="icon-xs" onClick={() => handleEditAdjustment(a)}>
+                    ✏️
+                  </Button>
+                  <Button variant="ghost" size="icon-xs" onClick={() => handleDeleteAdjustment(a.id)}>
+                    🗑️
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Order Dialog (Add / Edit) ── */}
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) resetForm(); setDialogOpen(open) }}>
@@ -761,6 +940,17 @@ export default function DayOrderPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <StockAdjustmentDialog
+        open={adjustmentDialogOpen}
+        onOpenChange={(open) => {
+          setAdjustmentDialogOpen(open)
+          if (!open) setEditingAdjustment(null)
+        }}
+        products={products as import('@/lib/types').Product[]}
+        initialValue={editingAdjustment?.value}
+        onSave={handleSaveAdjustment}
+      />
     </div>
   )
 }
