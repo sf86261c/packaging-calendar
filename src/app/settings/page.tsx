@@ -518,44 +518,149 @@ export default function SettingsPage() {
         </Card>
 
         {/* New product dialog */}
-        <Dialog open={productDialogOpen} onOpenChange={setProductDialogOpen}>
-          <DialogContent>
+        <Dialog
+          open={productDialogOpen}
+          onOpenChange={(open) => {
+            setProductDialogOpen(open)
+            if (!open) resetProductForm()
+          }}
+        >
+          <DialogContent className="max-w-xl">
             <DialogHeader>
-              <DialogTitle>新增產品</DialogTitle>
+              <DialogTitle>{editingProductId ? '編輯產品配方' : '新增產品'}</DialogTitle>
               <DialogDescription>
-                選擇分類並輸入產品名稱
+                {editingProductId
+                  ? '編輯產品的原料與包材消耗配方'
+                  : '選擇分類、輸入產品名稱，並設定原料與包材消耗'}
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label>分類</Label>
-                <select
-                  value={newProductCategory}
-                  onChange={(e) => setNewProductCategory(e.target.value)}
-                  className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                >
-                  <option value="" disabled>選擇分類</option>
-                  {CATEGORY_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {CATEGORY_ICONS[opt.value]} {opt.label}
-                    </option>
-                  ))}
-                </select>
+            <div className="space-y-4">
+              {/* 基本資訊 */}
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>分類</Label>
+                  <select
+                    value={newProductCategory}
+                    onChange={(e) => setNewProductCategory(e.target.value)}
+                    disabled={!!editingProductId}
+                    className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
+                  >
+                    <option value="" disabled>選擇分類</option>
+                    {CATEGORY_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {CATEGORY_ICONS[opt.value]} {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>名稱</Label>
+                  <Input
+                    value={newProductName}
+                    onChange={(e) => setNewProductName(e.target.value)}
+                    placeholder="輸入產品名稱"
+                  />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label>名稱</Label>
-                <Input
-                  value={newProductName}
-                  onChange={(e) => setNewProductName(e.target.value)}
-                  placeholder="輸入產品名稱"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') addProduct()
-                  }}
-                />
-              </div>
+
+              {/* 原料 / 包材（僅非 cake_bar/tube_pkg 顯示） */}
+              {newProductCategory && newProductCategory !== 'cake_bar' && newProductCategory !== 'tube_pkg' && (
+                <>
+                  <div className="space-y-2 border-t pt-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-gray-500">原料消耗（可選）</Label>
+                      <Button type="button" variant="ghost" size="xs" onClick={addRecipeRow}>
+                        <PlusIcon className="size-3" /> 新增原料
+                      </Button>
+                    </div>
+                    {newProductRecipes.length === 0 && (
+                      <p className="text-xs text-gray-400">尚無原料消耗</p>
+                    )}
+                    {newProductRecipes.map((row, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <select
+                          value={row.ingredientId}
+                          onChange={(e) => updateRecipeRow(i, 'ingredientId', e.target.value)}
+                          className="flex h-8 flex-1 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
+                        >
+                          <option value="" disabled>選擇原料</option>
+                          {products
+                            .filter((p) => (p.category === 'cake_bar' || p.category === 'tube_pkg') && p.is_active)
+                            .map((p) => (
+                              <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                        </select>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={row.qty}
+                          onChange={(e) => updateRecipeRow(i, 'qty', e.target.value)}
+                          className="h-8 w-20"
+                          placeholder="數量"
+                        />
+                        <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeRecipeRow(i)}>
+                          <XIcon className="size-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-2 border-t pt-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-gray-500">包材消耗（可選）</Label>
+                      <Button type="button" variant="ghost" size="xs" onClick={addMaterialRow}>
+                        <PlusIcon className="size-3" /> 新增包材
+                      </Button>
+                    </div>
+                    {newProductMaterials.length === 0 && (
+                      <p className="text-xs text-gray-400">尚無包材消耗</p>
+                    )}
+                    {newProductMaterials.map((row, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <select
+                          value={row.materialId}
+                          onChange={(e) => updateMaterialRow(i, 'materialId', e.target.value)}
+                          className="flex h-8 flex-1 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
+                        >
+                          <option value="" disabled>選擇包材</option>
+                          {materials.map((m) => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </select>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={row.qty}
+                          onChange={(e) => updateMaterialRow(i, 'qty', e.target.value)}
+                          className="h-8 w-20"
+                          placeholder="數量"
+                        />
+                        <select
+                          value={row.packagingStyleId}
+                          onChange={(e) => updateMaterialRow(i, 'packagingStyleId', e.target.value)}
+                          className="flex h-8 w-28 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
+                        >
+                          <option value="">套用全部</option>
+                          {packagingStyles
+                            .filter((ps) => ps.category === newProductCategory && ps.is_active)
+                            .map((ps) => (
+                              <option key={ps.id} value={ps.id}>{ps.name}</option>
+                            ))}
+                        </select>
+                        <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeMaterialRow(i)}>
+                          <XIcon className="size-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
             <DialogFooter>
-              <Button onClick={addProduct}>新增</Button>
+              <Button variant="outline" onClick={() => { resetProductForm(); setProductDialogOpen(false) }}>取消</Button>
+              <Button onClick={addProduct}>{editingProductId ? '儲存' : '新增'}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
