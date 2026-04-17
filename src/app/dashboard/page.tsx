@@ -28,6 +28,7 @@ export default function DashboardPage() {
     totalCookies: 0,
     pendingCount: 0,
     sampleCount: 0,
+    sampleBreakdown: [] as { name: string; qty: number }[],
     packagingStats: [] as { name: string; count: number }[],
     cookieStats: [] as { name: string; count: number }[],
     dailyShipments: [] as { date: string; cakes: number; tubes: number; cookies: number }[],
@@ -141,6 +142,43 @@ export default function DashboardPage() {
         .gte('date', ms)
         .lte('date', me)
 
+      // 本月試吃品項分布
+      const { data: sampleItemsData } = await supabase
+        .from('stock_adjustment_items')
+        .select(`
+          product_id,
+          quantity,
+          deduct_mode,
+          stock_adjustments!inner(date, adjustment_type)
+        `)
+        .eq('stock_adjustments.adjustment_type', 'sample')
+        .gte('stock_adjustments.date', ms)
+        .lte('stock_adjustments.date', me)
+
+      const sampleAgg: Record<string, number> = {}
+      if (sampleItemsData) {
+        type Row = { product_id: string; quantity: number }
+        for (const row of sampleItemsData as unknown as Row[]) {
+          sampleAgg[row.product_id] = (sampleAgg[row.product_id] || 0) + row.quantity
+        }
+      }
+
+      // Resolve product names
+      let sampleBreakdown: { name: string; qty: number }[] = []
+      if (Object.keys(sampleAgg).length > 0) {
+        const { data: productsData } = await supabase
+          .from('products')
+          .select('id, name')
+          .in('id', Object.keys(sampleAgg))
+
+        const nameMap: Record<string, string> = {}
+        for (const p of (productsData ?? [])) nameMap[p.id] = p.name
+
+        sampleBreakdown = Object.entries(sampleAgg)
+          .map(([pid, qty]) => ({ name: nameMap[pid] ?? '未知', qty }))
+          .sort((a, b) => b.qty - a.qty)
+      }
+
       setStats({
         totalOrders,
         totalCakes,
@@ -148,6 +186,7 @@ export default function DashboardPage() {
         totalCookies,
         pendingCount,
         sampleCount: sampleCount ?? 0,
+        sampleBreakdown,
         packagingStats: Object.entries(pkgMap)
           .map(([name, count]) => ({ name, count }))
           .sort((a, b) => b.count - a.count),
@@ -384,6 +423,35 @@ export default function DashboardPage() {
                 />
               </AreaChart>
             </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Row 3: Sample Breakdown BarChart */}
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader><CardTitle className="text-base">本月試吃品項分布</CardTitle></CardHeader>
+          <CardContent>
+            {stats.sampleBreakdown.length === 0 && !loading ? (
+              <p className="py-4 text-center text-sm text-gray-400">本月尚無試吃紀錄</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart
+                  data={stats.sampleBreakdown}
+                  layout="vertical"
+                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis type="number" allowDecimals={true} tick={{ fontSize: 12 }} />
+                  <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 12 }} />
+                  <Tooltip
+                    formatter={(value: any) => [`${value}`, '試吃數量']}
+                    contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }}
+                  />
+                  <Bar dataKey="qty" name="試吃數量" fill="#10b981" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
       </div>
