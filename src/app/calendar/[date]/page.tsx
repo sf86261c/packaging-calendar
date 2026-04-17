@@ -144,7 +144,7 @@ export default function DayOrderPage() {
       .from('stock_adjustments')
       .select(`
         id, date, adjustment_type, note, created_at,
-        stock_adjustment_items (id, adjustment_id, product_id, quantity, deduct_mode)
+        stock_adjustment_items (id, adjustment_id, product_id, quantity, deduct_mode, packaging_style_id)
       `)
       .eq('date', dateStr)
       .order('created_at', { ascending: false })
@@ -468,6 +468,7 @@ export default function DayOrderPage() {
       product_id: i.productId,
       quantity: parseFloat(i.quantity),
       deduct_mode: i.deductMode,
+      packaging_style_id: i.packagingStyleId || null,
     }))
     const { error: itemErr } = await supabase.from('stock_adjustment_items').insert(itemRows)
     if (itemErr) throw new Error(itemErr.message)
@@ -477,11 +478,13 @@ export default function DayOrderPage() {
 
     // 分類項目：成品 → 透過 recipe 展開；原料 → 直接聚合扣減
     const finishedEntries: [string, number][] = []
+    const finishedPackaging: Record<string, string | null> = {}
     const directDeductions: Record<string, number> = {}
     for (const i of value.items) {
       const qty = parseFloat(i.quantity)
       if (i.deductMode === 'finished') {
         finishedEntries.push([i.productId, qty])
+        finishedPackaging[i.productId] = i.packagingStyleId || null
       } else {
         directDeductions[i.productId] = (directDeductions[i.productId] || 0) + qty
       }
@@ -501,7 +504,7 @@ export default function DayOrderPage() {
         finishedEntries,
         products,
         materialUsages,
-        () => null,
+        (productId) => finishedPackaging[productId] ?? null,
         (id) => packagingStyles.find((ps) => ps.id === id)?.name ?? null,
       )
       await applyMaterialDeductionsHelper(supabase, materialDeductions, referenceNote, dateStr)
@@ -529,6 +532,7 @@ export default function DayOrderPage() {
           productId: item.product_id,
           quantity: String(item.quantity),
           deductMode: item.deduct_mode,
+          packagingStyleId: item.packaging_style_id ?? '',
         })),
       },
     })
@@ -957,6 +961,7 @@ export default function DayOrderPage() {
           if (!open) setEditingAdjustment(null)
         }}
         products={products as import('@/lib/types').Product[]}
+        packagingStyles={packagingStyles as import('@/lib/types').PackagingStyle[]}
         initialValue={editingAdjustment?.value}
         onSave={handleSaveAdjustment}
       />

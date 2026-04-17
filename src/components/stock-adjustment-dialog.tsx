@@ -8,12 +8,13 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { PlusIcon, XIcon } from 'lucide-react'
-import type { Product, AdjustmentType, DeductMode } from '@/lib/types'
+import type { Product, PackagingStyle, AdjustmentType, DeductMode } from '@/lib/types'
 
 export interface AdjustmentItemInput {
   productId: string
   quantity: string
   deductMode: DeductMode
+  packagingStyleId?: string
 }
 
 export interface AdjustmentInput {
@@ -26,17 +27,18 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   products: Product[]
+  packagingStyles: PackagingStyle[]
   initialValue?: AdjustmentInput
   onSave: (value: AdjustmentInput) => Promise<void>
 }
 
 export function StockAdjustmentDialog({
-  open, onOpenChange, products, initialValue, onSave,
+  open, onOpenChange, products, packagingStyles, initialValue, onSave,
 }: Props) {
   const [adjustmentType, setAdjustmentType] = useState<AdjustmentType>('sample')
   const [note, setNote] = useState('')
   const [items, setItems] = useState<AdjustmentItemInput[]>([
-    { productId: '', quantity: '1', deductMode: 'finished' },
+    { productId: '', quantity: '1', deductMode: 'finished', packagingStyleId: '' },
   ])
   const [saving, setSaving] = useState(false)
 
@@ -45,17 +47,17 @@ export function StockAdjustmentDialog({
       setAdjustmentType(initialValue.adjustmentType)
       setNote(initialValue.note)
       setItems(initialValue.items.length > 0 ? initialValue.items : [
-        { productId: '', quantity: '1', deductMode: 'finished' },
+        { productId: '', quantity: '1', deductMode: 'finished', packagingStyleId: '' },
       ])
     } else if (open && !initialValue) {
       setAdjustmentType('sample')
       setNote('')
-      setItems([{ productId: '', quantity: '1', deductMode: 'finished' }])
+      setItems([{ productId: '', quantity: '1', deductMode: 'finished', packagingStyleId: '' }])
     }
   }, [open, initialValue])
 
   const addItem = () =>
-    setItems((prev) => [...prev, { productId: '', quantity: '1', deductMode: 'finished' }])
+    setItems((prev) => [...prev, { productId: '', quantity: '1', deductMode: 'finished', packagingStyleId: '' }])
 
   const removeItem = (i: number) =>
     setItems((prev) => prev.filter((_, idx) => idx !== i))
@@ -83,16 +85,26 @@ export function StockAdjustmentDialog({
     }
   }
 
-  const finishedProducts = products.filter(
-    (p) => p.is_active && ['cake', 'tube', 'cookie', 'single_cake'].includes(p.category),
-  )
+  // 成品：僅列蜂蜜蛋糕試吃(cake 含"試吃")、旋轉筒試吃(tube 含"試吃")、所有曲奇
+  const finishedProducts = products.filter((p) => {
+    if (!p.is_active) return false
+    if (p.category === 'cookie') return true
+    if ((p.category === 'cake' || p.category === 'tube') && p.name.includes('試吃')) return true
+    return false
+  })
+
+  // 原料：cake_bar + tube_pkg
   const ingredientProducts = products.filter(
     (p) => p.is_active && ['cake_bar', 'tube_pkg'].includes(p.category),
   )
 
+  const productById = (id: string) => products.find((p) => p.id === id)
+  const packagingOptionsForCategory = (cat: string) =>
+    packagingStyles.filter((ps) => ps.category === cat && ps.is_active)
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="w-[calc(100%-1rem)] max-w-xl max-h-[90vh] overflow-y-auto overflow-x-hidden bg-white">
         <DialogHeader>
           <DialogTitle>今日試吃 / 耗損</DialogTitle>
         </DialogHeader>
@@ -133,54 +145,86 @@ export function StockAdjustmentDialog({
             </div>
             {items.map((row, i) => {
               const productList = row.deductMode === 'finished' ? finishedProducts : ingredientProducts
+              const selectedProduct = productById(row.productId)
+              const needsPackaging = row.deductMode === 'finished'
+                && selectedProduct
+                && (selectedProduct.category === 'cake' || selectedProduct.category === 'tube')
+              const pkgOptions = selectedProduct ? packagingOptionsForCategory(selectedProduct.category) : []
               return (
-                <div key={i} className="flex flex-wrap items-center gap-2">
-                  <div className="flex gap-2">
-                    <label className="flex items-center gap-1 text-xs">
-                      <input
-                        type="radio"
-                        checked={row.deductMode === 'finished'}
-                        onChange={() => {
-                          updateItem(i, 'deductMode', 'finished')
-                          updateItem(i, 'productId', '')
+                <div key={i} className="space-y-1.5 rounded-lg border p-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex gap-2">
+                      <label className="flex items-center gap-1 text-xs">
+                        <input
+                          type="radio"
+                          checked={row.deductMode === 'finished'}
+                          onChange={() => {
+                            updateItem(i, 'deductMode', 'finished')
+                            updateItem(i, 'productId', '')
+                            updateItem(i, 'packagingStyleId', '')
+                          }}
+                        />
+                        成品
+                      </label>
+                      <label className="flex items-center gap-1 text-xs">
+                        <input
+                          type="radio"
+                          checked={row.deductMode === 'ingredient'}
+                          onChange={() => {
+                            updateItem(i, 'deductMode', 'ingredient')
+                            updateItem(i, 'productId', '')
+                            updateItem(i, 'packagingStyleId', '')
+                          }}
+                        />
+                        原料
+                      </label>
+                    </div>
+                    <div className="flex min-w-0 flex-1 basis-[10rem] items-center gap-1.5">
+                      <span className="shrink-0 rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                        {row.deductMode === 'finished' ? '成品' : '原料'}
+                      </span>
+                      <select
+                        value={row.productId}
+                        onChange={(e) => {
+                          updateItem(i, 'productId', e.target.value)
+                          updateItem(i, 'packagingStyleId', '')
                         }}
-                      />
-                      成品
-                    </label>
-                    <label className="flex items-center gap-1 text-xs">
-                      <input
-                        type="radio"
-                        checked={row.deductMode === 'ingredient'}
-                        onChange={() => {
-                          updateItem(i, 'deductMode', 'ingredient')
-                          updateItem(i, 'productId', '')
-                        }}
-                      />
-                      原料
-                    </label>
+                        className="flex h-8 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
+                      >
+                        <option value="" disabled>選擇產品</option>
+                        {productList.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={row.quantity}
+                      onChange={(e) => updateItem(i, 'quantity', e.target.value)}
+                      className="h-8 w-20 shrink-0"
+                      placeholder="數量"
+                    />
+                    <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeItem(i)} className="shrink-0">
+                      <XIcon className="size-3" />
+                    </Button>
                   </div>
-                  <select
-                    value={row.productId}
-                    onChange={(e) => updateItem(i, 'productId', e.target.value)}
-                    className="flex h-8 flex-1 min-w-[120px] rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
-                  >
-                    <option value="" disabled>選擇產品</option>
-                    {productList.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={row.quantity}
-                    onChange={(e) => updateItem(i, 'quantity', e.target.value)}
-                    className="h-8 w-20"
-                    placeholder="數量"
-                  />
-                  <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeItem(i)}>
-                    <XIcon className="size-3" />
-                  </Button>
+                  {needsPackaging && (
+                    <div className="flex items-center gap-1.5 pl-1">
+                      <span className="shrink-0 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">款式</span>
+                      <select
+                        value={row.packagingStyleId ?? ''}
+                        onChange={(e) => updateItem(i, 'packagingStyleId', e.target.value)}
+                        className="flex h-8 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
+                      >
+                        <option value="" disabled>選擇包裝款式</option>
+                        {pkgOptions.map((ps) => (
+                          <option key={ps.id} value={ps.id}>{ps.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
               )
             })}
