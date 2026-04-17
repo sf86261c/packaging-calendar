@@ -666,7 +666,7 @@ export default function SettingsPage() {
             if (!open) resetProductForm()
           }}
         >
-          <DialogContent className="max-w-xl">
+          <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto bg-white">
             <DialogHeader>
               <DialogTitle>{editingProductId ? '編輯產品配方' : '新增產品'}</DialogTitle>
               <DialogDescription>
