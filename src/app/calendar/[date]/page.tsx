@@ -29,7 +29,6 @@ import {
   applyMaterialDeductions as applyMaterialDeductionsHelper,
   reverseIngredientDeductions as reverseIngredientDeductionsHelper,
   reverseMaterialDeductions as reverseMaterialDeductionsHelper,
-  deductDirectIngredient,
 } from '@/lib/stock'
 import { StockAdjustmentDialog } from '@/components/stock-adjustment-dialog'
 import type { AdjustmentInput } from '@/components/stock-adjustment-dialog'
@@ -475,15 +474,25 @@ export default function DayOrderPage() {
 
     // 扣減 inventory
     const referenceNote = `adjust:${adjustmentId}`
+
+    // 分類項目：成品 → 透過 recipe 展開；原料 → 直接聚合扣減
     const finishedEntries: [string, number][] = []
+    const directDeductions: Record<string, number> = {}
     for (const i of value.items) {
+      const qty = parseFloat(i.quantity)
       if (i.deductMode === 'finished') {
-        finishedEntries.push([i.productId, parseFloat(i.quantity)])
+        finishedEntries.push([i.productId, qty])
       } else {
-        await deductDirectIngredient(supabase, i.productId, parseFloat(i.quantity), referenceNote, dateStr)
+        directDeductions[i.productId] = (directDeductions[i.productId] || 0) + qty
       }
     }
 
+    // 原料直接扣減（batched）
+    if (Object.keys(directDeductions).length > 0) {
+      await applyIngredientDeductionsHelper(supabase, directDeductions, referenceNote, dateStr)
+    }
+
+    // 成品透過 recipe 展開扣減
     if (finishedEntries.length > 0) {
       const ingredientDeductions = calculateIngredientDeductions(finishedEntries, recipes)
       await applyIngredientDeductionsHelper(supabase, ingredientDeductions, referenceNote, dateStr)
