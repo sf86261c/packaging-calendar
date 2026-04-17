@@ -719,18 +719,21 @@ export default function SettingsPage() {
                     )}
                     {newProductRecipes.map((row, i) => (
                       <div key={i} className="flex flex-wrap items-center gap-2">
-                        <select
-                          value={row.ingredientId}
-                          onChange={(e) => updateRecipeRow(i, 'ingredientId', e.target.value)}
-                          className="flex h-8 min-w-0 flex-1 basis-[10rem] rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
-                        >
-                          <option value="" disabled>選擇原料</option>
-                          {products
-                            .filter((p) => (p.category === 'cake_bar' || p.category === 'tube_pkg') && p.is_active)
-                            .map((p) => (
-                              <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
-                        </select>
+                        <div className="flex min-w-0 flex-1 basis-[11rem] items-center gap-1.5">
+                          <span className="shrink-0 rounded-md bg-pink-100 px-2 py-0.5 text-xs font-medium text-pink-700">原料</span>
+                          <select
+                            value={row.ingredientId}
+                            onChange={(e) => updateRecipeRow(i, 'ingredientId', e.target.value)}
+                            className="flex h-8 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
+                          >
+                            <option value="" disabled>選擇原料</option>
+                            {products
+                              .filter((p) => (p.category === 'cake_bar' || p.category === 'tube_pkg') && p.is_active)
+                              .map((p) => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                          </select>
+                        </div>
                         <Input
                           type="number"
                           step="0.01"
@@ -759,16 +762,19 @@ export default function SettingsPage() {
                     )}
                     {newProductMaterials.map((row, i) => (
                       <div key={i} className="flex flex-wrap items-center gap-2">
-                        <select
-                          value={row.materialId}
-                          onChange={(e) => updateMaterialRow(i, 'materialId', e.target.value)}
-                          className="flex h-8 min-w-0 flex-1 basis-[10rem] rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
-                        >
-                          <option value="" disabled>選擇包材</option>
-                          {materials.map((m) => (
-                            <option key={m.id} value={m.id}>{m.name}</option>
-                          ))}
-                        </select>
+                        <div className="flex min-w-0 flex-1 basis-[11rem] items-center gap-1.5">
+                          <span className="shrink-0 rounded-md bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">包材</span>
+                          <select
+                            value={row.materialId}
+                            onChange={(e) => updateMaterialRow(i, 'materialId', e.target.value)}
+                            className="flex h-8 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
+                          >
+                            <option value="" disabled>選擇包材</option>
+                            {materials.map((m) => (
+                              <option key={m.id} value={m.id}>{m.name}</option>
+                            ))}
+                          </select>
+                        </div>
                         <Input
                           type="number"
                           step="0.01"
@@ -778,18 +784,21 @@ export default function SettingsPage() {
                           className="h-8 w-20 shrink-0"
                           placeholder="數量"
                         />
-                        <select
-                          value={row.packagingStyleId}
-                          onChange={(e) => updateMaterialRow(i, 'packagingStyleId', e.target.value)}
-                          className="flex h-8 min-w-0 flex-1 basis-[7rem] rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
-                        >
-                          <option value="">套用全部</option>
-                          {packagingStyles
-                            .filter((ps) => ps.category === newProductCategory && ps.is_active)
-                            .map((ps) => (
-                              <option key={ps.id} value={ps.id}>{ps.name}</option>
-                            ))}
-                        </select>
+                        <div className="flex min-w-0 flex-1 basis-[9rem] items-center gap-1.5">
+                          <span className="shrink-0 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">款式</span>
+                          <select
+                            value={row.packagingStyleId}
+                            onChange={(e) => updateMaterialRow(i, 'packagingStyleId', e.target.value)}
+                            className="flex h-8 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
+                          >
+                            <option value="">套用全部</option>
+                            {packagingStyles
+                              .filter((ps) => ps.category === newProductCategory && ps.is_active)
+                              .map((ps) => (
+                                <option key={ps.id} value={ps.id}>{ps.name}</option>
+                              ))}
+                          </select>
+                        </div>
                         <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeMaterialRow(i)} className="shrink-0">
                           <XIcon className="size-3" />
                         </Button>
