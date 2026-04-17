@@ -15,18 +15,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+// Note: base-ui Select uses Portal which conflicts with Dialog's modal focus trap.
+// Using native <select> inside dialogs instead.
 import { PlusIcon, CheckIcon, XIcon } from 'lucide-react'
+import type { PackagingMaterial, ProductRecipe, ProductMaterialUsage } from '@/lib/types'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+interface RecipeRow {
+  ingredientId: string
+  qty: string
+}
+
+interface MaterialRow {
+  materialId: string
+  qty: string
+  packagingStyleId: string  // '' = 全部適用 (universal match)
+}
 
 interface Product {
   id: string
@@ -195,6 +202,9 @@ export default function SettingsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [packagingStyles, setPackagingStyles] = useState<PackagingStyle[]>([])
   const [brandingStyles, setBrandingStyles] = useState<BrandingStyle[]>([])
+  const [materials, setMaterials] = useState<PackagingMaterial[]>([])
+  const [recipes, setRecipes] = useState<ProductRecipe[]>([])
+  const [materialUsages, setMaterialUsages] = useState<ProductMaterialUsage[]>([])
 
   // Dialog states
   const [productDialogOpen, setProductDialogOpen] = useState(false)
@@ -209,6 +219,9 @@ export default function SettingsPage() {
   const [newPackagingCategory, setNewPackagingCategory] = useState('')
   const [newBrandingName, setNewBrandingName] = useState('')
   const [newBrandingCategory, setNewBrandingCategory] = useState('')
+  const [newProductRecipes, setNewProductRecipes] = useState<RecipeRow[]>([])
+  const [newProductMaterials, setNewProductMaterials] = useState<MaterialRow[]>([])
+  const [editingProductId, setEditingProductId] = useState<string | null>(null)
 
   // --- Fetch data ----------------------------------------------------------
 
@@ -236,22 +249,52 @@ export default function SettingsPage() {
     if (data) setBrandingStyles(data)
   }, [supabase])
 
+  const fetchMaterials = useCallback(async () => {
+    const { data } = await supabase
+      .from('packaging_materials')
+      .select('*')
+      .eq('is_active', true)
+      .order('name')
+    if (data) setMaterials(data as PackagingMaterial[])
+  }, [supabase])
+
+  const fetchRecipes = useCallback(async () => {
+    const { data } = await supabase
+      .from('product_recipe')
+      .select('id, product_id, ingredient_id, quantity_per_unit, created_at')
+    if (data) setRecipes(data as ProductRecipe[])
+  }, [supabase])
+
+  const fetchMaterialUsages = useCallback(async () => {
+    const { data } = await supabase
+      .from('product_material_usage')
+      .select('*')
+    if (data) setMaterialUsages(data as ProductMaterialUsage[])
+  }, [supabase])
+
   useEffect(() => {
     fetchProducts()
     fetchPackagingStyles()
     fetchBrandingStyles()
-  }, [fetchProducts, fetchPackagingStyles, fetchBrandingStyles])
+    fetchMaterials()
+    fetchRecipes()
+    fetchMaterialUsages()
+  }, [fetchProducts, fetchPackagingStyles, fetchBrandingStyles, fetchMaterials, fetchRecipes, fetchMaterialUsages])
 
   // --- Product CRUD --------------------------------------------------------
 
   const addProduct = async () => {
     const trimmed = newProductName.trim()
     if (!trimmed || !newProductCategory) return
-    await supabase.from('products').insert({
+    const { error } = await supabase.from('products').insert({
       category: newProductCategory,
       name: trimmed,
       sort_order: 99,
     })
+    if (error) {
+      alert(`新增失敗：${error.message}`)
+      return
+    }
     setNewProductName('')
     setNewProductCategory('')
     setProductDialogOpen(false)
@@ -271,16 +314,55 @@ export default function SettingsPage() {
     fetchProducts()
   }
 
+  // --- Recipe / material row handlers (used in Task 7 Dialog UI) -----------
+
+  const addRecipeRow = () =>
+    setNewProductRecipes((prev) => [...prev, { ingredientId: '', qty: '1' }])
+
+  const removeRecipeRow = (index: number) =>
+    setNewProductRecipes((prev) => prev.filter((_, i) => i !== index))
+
+  const updateRecipeRow = (index: number, field: keyof RecipeRow, value: string) =>
+    setNewProductRecipes((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)),
+    )
+
+  const addMaterialRow = () =>
+    setNewProductMaterials((prev) => [
+      ...prev,
+      { materialId: '', qty: '1', packagingStyleId: '' },
+    ])
+
+  const removeMaterialRow = (index: number) =>
+    setNewProductMaterials((prev) => prev.filter((_, i) => i !== index))
+
+  const updateMaterialRow = (index: number, field: keyof MaterialRow, value: string) =>
+    setNewProductMaterials((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)),
+    )
+
+  const resetProductForm = () => {
+    setNewProductCategory('')
+    setNewProductName('')
+    setNewProductRecipes([])
+    setNewProductMaterials([])
+    setEditingProductId(null)
+  }
+
   // --- Packaging style CRUD ------------------------------------------------
 
   const addPackagingStyle = async () => {
     const trimmed = newPackagingName.trim()
     if (!trimmed || !newPackagingCategory) return
-    await supabase.from('packaging_styles').insert({
+    const { error } = await supabase.from('packaging_styles').insert({
       name: trimmed,
       color_code: newPackagingColor,
       category: newPackagingCategory,
     })
+    if (error) {
+      alert(`新增失敗：${error.message}`)
+      return
+    }
     setNewPackagingName('')
     setNewPackagingColor('#000000')
     setNewPackagingCategory('')
@@ -309,10 +391,14 @@ export default function SettingsPage() {
   const addBrandingStyle = async () => {
     const trimmed = newBrandingName.trim()
     if (!trimmed || !newBrandingCategory) return
-    await supabase.from('branding_styles').insert({
+    const { error } = await supabase.from('branding_styles').insert({
       name: trimmed,
       category: newBrandingCategory,
     })
+    if (error) {
+      alert(`新增失敗：${error.message}`)
+      return
+    }
     setNewBrandingName('')
     setNewBrandingCategory('')
     setBrandingDialogOpen(false)
@@ -443,23 +529,18 @@ export default function SettingsPage() {
             <div className="space-y-3">
               <div className="space-y-1.5">
                 <Label>分類</Label>
-                <Select
-                  value={newProductCategory || undefined}
-                  onValueChange={(v) => v && setNewProductCategory(v)}
+                <select
+                  value={newProductCategory}
+                  onChange={(e) => setNewProductCategory(e.target.value)}
+                  className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                 >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="選擇分類">
-                      {newProductCategory ? `${CATEGORY_ICONS[newProductCategory] || ''} ${CATEGORY_LABELS[newProductCategory] || newProductCategory}` : undefined}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CATEGORY_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {CATEGORY_ICONS[opt.value]} {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  <option value="" disabled>選擇分類</option>
+                  {CATEGORY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {CATEGORY_ICONS[opt.value]} {opt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1.5">
                 <Label>名稱</Label>
@@ -556,25 +637,18 @@ export default function SettingsPage() {
             <div className="space-y-3">
               <div className="space-y-1.5">
                 <Label>適用類別</Label>
-                <Select
-                  value={newPackagingCategory || undefined}
-                  onValueChange={(v) => v && setNewPackagingCategory(v)}
+                <select
+                  value={newPackagingCategory}
+                  onChange={(e) => setNewPackagingCategory(e.target.value)}
+                  className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                 >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="選擇類別">
-                      {newPackagingCategory
-                        ? `${PKG_CATEGORY_ICONS[newPackagingCategory] || ''} ${PKG_CATEGORY_LABELS[newPackagingCategory] || newPackagingCategory}`
-                        : undefined}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PKG_CATEGORY_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {PKG_CATEGORY_ICONS[opt.value]} {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  <option value="" disabled>選擇類別</option>
+                  {PKG_CATEGORY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {PKG_CATEGORY_ICONS[opt.value]} {opt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1.5">
                 <Label>名稱</Label>
@@ -680,25 +754,18 @@ export default function SettingsPage() {
             <div className="space-y-3">
               <div className="space-y-1.5">
                 <Label>適用類別</Label>
-                <Select
-                  value={newBrandingCategory || undefined}
-                  onValueChange={(v) => v && setNewBrandingCategory(v)}
+                <select
+                  value={newBrandingCategory}
+                  onChange={(e) => setNewBrandingCategory(e.target.value)}
+                  className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                 >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="選擇類別">
-                      {newBrandingCategory
-                        ? `${PKG_CATEGORY_ICONS[newBrandingCategory] || ''} ${PKG_CATEGORY_LABELS[newBrandingCategory] || newBrandingCategory}`
-                        : undefined}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PKG_CATEGORY_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {PKG_CATEGORY_ICONS[opt.value]} {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  <option value="" disabled>選擇類別</option>
+                  {PKG_CATEGORY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {PKG_CATEGORY_ICONS[opt.value]} {opt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1.5">
                 <Label>名稱</Label>
