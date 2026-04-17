@@ -32,7 +32,7 @@
 | 客戶搜尋 | `/search` | ✅ 完成 | 即時搜尋(ilike)、點擊跳轉日期頁 |
 | 統計儀表板 | `/dashboard` | ✅ 完成 | 6 統計卡片 + 5 Recharts 圖表（含試吃統計） |
 | 產品庫存 | `/inventory` | ✅ 完成 | 蛋糕條/曲奇/旋轉筒包裝庫存、日期查詢、Realtime |
-| 包材庫存 | `/materials` | ✅ 完成 | 包材 CRUD、編輯/刪除、入庫、階層式用量對照、日期查詢 |
+| 包材庫存 | `/materials` | ✅ 完成 | 包材 CRUD、編輯/刪除、入庫、日期查詢（用量對照已移至 /settings 📋 編輯配方） |
 | 設定 | `/settings` | ✅ 完成 | 產品/包裝/烙印 CRUD、**新增產品可同步設定原料配方與包材消耗**、每項產品可📋編輯配方 |
 
 ### 產品結構
@@ -138,10 +138,9 @@
 - 包材品項 CRUD（名稱、單位、安全庫存、**到貨時間 D+?**）+ 編輯/刪除/停用
 - **到貨時間（lead_time_days）**：每種包材可設定叫貨後幾天到貨，用於叫貨通知判斷
 - 入庫紀錄管理
-- **階層式用量對照**：產品類別 → 口味 → 包裝款式 → 多種包材組成
-- 用量對照分組顯示（按產品+包裝分組）
 - **日期選擇器**：歷史庫存查詢
 - 低庫存警示
+- 用量對照已移至 `/settings` 頁面（點產品旁 📋 編輯配方，原料配方 + 包材消耗同介面）
 
 ### 設定頁面 CRUD
 
@@ -233,7 +232,7 @@ packaging-calendar/
 │   │   ├── search/page.tsx         # 客戶搜尋
 │   │   ├── dashboard/page.tsx      # 統計儀表板 (Recharts, 5卡片+4圖表)
 │   │   ├── inventory/page.tsx      # 產品庫存 (D+10+LINE叫貨+Realtime)
-│   │   ├── materials/page.tsx      # 包材庫存 (CRUD+階層式用量對照+日期查詢)
+│   │   ├── materials/page.tsx      # 包材庫存 (CRUD+入庫+日期查詢)
 │   │   ├── settings/page.tsx       # 設定 (CRUD)
 │   │   └── api/
 │   │       └── line-notify/route.ts # LINE 叫貨通知 API
