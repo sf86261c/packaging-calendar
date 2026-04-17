@@ -460,6 +460,28 @@ export default function SettingsPage() {
     setEditingProductId(null)
   }
 
+  const openEditProduct = (product: Product) => {
+    setEditingProductId(product.id)
+    setNewProductCategory(product.category)
+    setNewProductName(product.name)
+
+    const productRecipes = recipes
+      .filter((r) => r.product_id === product.id)
+      .map((r) => ({ ingredientId: r.ingredient_id, qty: String(r.quantity_per_unit) }))
+    setNewProductRecipes(productRecipes)
+
+    const productMaterials = materialUsages
+      .filter((u) => u.product_id === product.id)
+      .map((u) => ({
+        materialId: u.material_id,
+        qty: String(u.quantity_per_unit),
+        packagingStyleId: u.packaging_style_id ?? '',
+      }))
+    setNewProductMaterials(productMaterials)
+
+    setProductDialogOpen(true)
+  }
+
   // --- Packaging style CRUD ------------------------------------------------
 
   const addPackagingStyle = async () => {
@@ -611,6 +633,14 @@ export default function SettingsPage() {
                           onSave={(name) => updateProductName(product.id, name)}
                         />
                       </Badge>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => openEditProduct(product)}
+                        title="編輯配方"
+                      >
+                        📋
+                      </Button>
                       <ActiveToggle
                         isActive={product.is_active}
                         onToggle={() =>
