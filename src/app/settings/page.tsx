@@ -666,7 +666,7 @@ export default function SettingsPage() {
             if (!open) resetProductForm()
           }}
         >
-          <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto bg-white">
+          <DialogContent className="w-[calc(100%-1rem)] max-w-xl max-h-[90vh] overflow-y-auto overflow-x-hidden bg-white">
             <DialogHeader>
               <DialogTitle>{editingProductId ? '編輯產品配方' : '新增產品'}</DialogTitle>
               <DialogDescription>
@@ -718,11 +718,11 @@ export default function SettingsPage() {
                       <p className="text-xs text-gray-400">尚無原料消耗</p>
                     )}
                     {newProductRecipes.map((row, i) => (
-                      <div key={i} className="flex items-center gap-2">
+                      <div key={i} className="flex flex-wrap items-center gap-2">
                         <select
                           value={row.ingredientId}
                           onChange={(e) => updateRecipeRow(i, 'ingredientId', e.target.value)}
-                          className="flex h-8 flex-1 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
+                          className="flex h-8 min-w-0 flex-1 basis-[10rem] rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
                         >
                           <option value="" disabled>選擇原料</option>
                           {products
@@ -737,10 +737,10 @@ export default function SettingsPage() {
                           min="0"
                           value={row.qty}
                           onChange={(e) => updateRecipeRow(i, 'qty', e.target.value)}
-                          className="h-8 w-20"
+                          className="h-8 w-20 shrink-0"
                           placeholder="數量"
                         />
-                        <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeRecipeRow(i)}>
+                        <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeRecipeRow(i)} className="shrink-0">
                           <XIcon className="size-3" />
                         </Button>
                       </div>
@@ -758,11 +758,11 @@ export default function SettingsPage() {
                       <p className="text-xs text-gray-400">尚無包材消耗</p>
                     )}
                     {newProductMaterials.map((row, i) => (
-                      <div key={i} className="flex items-center gap-2">
+                      <div key={i} className="flex flex-wrap items-center gap-2">
                         <select
                           value={row.materialId}
                           onChange={(e) => updateMaterialRow(i, 'materialId', e.target.value)}
-                          className="flex h-8 flex-1 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
+                          className="flex h-8 min-w-0 flex-1 basis-[10rem] rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
                         >
                           <option value="" disabled>選擇包材</option>
                           {materials.map((m) => (
@@ -775,13 +775,13 @@ export default function SettingsPage() {
                           min="0"
                           value={row.qty}
                           onChange={(e) => updateMaterialRow(i, 'qty', e.target.value)}
-                          className="h-8 w-20"
+                          className="h-8 w-20 shrink-0"
                           placeholder="數量"
                         />
                         <select
                           value={row.packagingStyleId}
                           onChange={(e) => updateMaterialRow(i, 'packagingStyleId', e.target.value)}
-                          className="flex h-8 w-28 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
+                          className="flex h-8 min-w-0 flex-1 basis-[7rem] rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
                         >
                           <option value="">套用全部</option>
                           {packagingStyles
@@ -790,7 +790,7 @@ export default function SettingsPage() {
                               <option key={ps.id} value={ps.id}>{ps.name}</option>
                             ))}
                         </select>
-                        <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeMaterialRow(i)}>
+                        <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeMaterialRow(i)} className="shrink-0">
                           <XIcon className="size-3" />
                         </Button>
                       </div>
