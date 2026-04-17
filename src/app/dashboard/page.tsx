@@ -27,6 +27,7 @@ export default function DashboardPage() {
     totalTubes: 0,
     totalCookies: 0,
     pendingCount: 0,
+    sampleCount: 0,
     packagingStats: [] as { name: string; count: number }[],
     cookieStats: [] as { name: string; count: number }[],
     dailyShipments: [] as { date: string; cakes: number; tubes: number; cookies: number }[],
@@ -132,12 +133,21 @@ export default function DashboardPage() {
         }
       })
 
+      // 本月試吃次數
+      const { count: sampleCount } = await supabase
+        .from('stock_adjustments')
+        .select('*', { count: 'exact', head: true })
+        .eq('adjustment_type', 'sample')
+        .gte('date', ms)
+        .lte('date', me)
+
       setStats({
         totalOrders,
         totalCakes,
         totalTubes,
         totalCookies,
         pendingCount,
+        sampleCount: sampleCount ?? 0,
         packagingStats: Object.entries(pkgMap)
           .map(([name, count]) => ({ name, count }))
           .sort((a, b) => b.count - a.count),
@@ -170,7 +180,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Top 4 stat cards */}
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500">本月訂單</CardTitle></CardHeader>
           <CardContent><div className="text-3xl font-bold">{stats.totalOrders}</div><p className="text-xs text-gray-500">筆</p></CardContent>
@@ -190,6 +200,13 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500">未列印</CardTitle></CardHeader>
           <CardContent><div className="text-3xl font-bold text-orange-600">{stats.pendingCount}</div><p className="text-xs text-gray-500">筆訂單</p></CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500">本月試吃次數</CardTitle></CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-green-600">{stats.sampleCount}</div>
+            <p className="text-xs text-gray-500">筆</p>
+          </CardContent>
         </Card>
       </div>
 
