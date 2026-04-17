@@ -21,7 +21,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import type { ProductRecipe } from '@/lib/types'
+import type { ProductRecipe, ProductMaterialUsage } from '@/lib/types'
 import {
   calculateIngredientDeductions,
   calculateMaterialDeductions as calcMaterialDeductionsHelper,
@@ -60,7 +60,7 @@ export default function DayOrderPage() {
   const [products, setProducts] = useState<any[]>([])
   const [packagingStyles, setPackagingStyles] = useState<any[]>([])
   const [brandingStyles, setBrandingStyles] = useState<any[]>([])
-  const [materialUsages, setMaterialUsages] = useState<{ product_id: string; material_id: string; packaging_style_id: string | null; quantity_per_unit: number }[]>([])
+  const [materialUsages, setMaterialUsages] = useState<ProductMaterialUsage[]>([])
   const [recipes, setRecipes] = useState<ProductRecipe[]>([])
   const [materialWarning, setMaterialWarning] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -135,13 +135,13 @@ export default function DayOrderPage() {
       supabase.from('products').select('*').eq('is_active', true).order('sort_order'),
       supabase.from('packaging_styles').select('*').eq('is_active', true),
       supabase.from('branding_styles').select('*').eq('is_active', true),
-      supabase.from('product_material_usage').select('product_id, material_id, packaging_style_id, quantity_per_unit'),
+      supabase.from('product_material_usage').select('id, product_id, material_id, packaging_style_id, quantity_per_unit'),
       supabase.from('product_recipe').select('id, product_id, ingredient_id, quantity_per_unit, created_at'),
     ]).then(([pr, pk, br, mu, rc]) => {
       if (pr.data) setProducts(pr.data)
       if (pk.data) setPackagingStyles(pk.data)
       if (br.data) setBrandingStyles(br.data)
-      if (mu.data) setMaterialUsages(mu.data)
+      if (mu.data) setMaterialUsages(mu.data as ProductMaterialUsage[])
       if (rc.data) setRecipes(rc.data as ProductRecipe[])
     })
   }, [])
@@ -264,7 +264,7 @@ export default function DayOrderPage() {
     return calcMaterialDeductionsHelper(
       itemEntries,
       products,
-      materialUsages as any,
+      materialUsages,
       (productId) => {
         const product = products.find((p) => p.id === productId)
         if (!product) return null
