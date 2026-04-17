@@ -24,16 +24,20 @@ CREATE POLICY "Authenticated users can delete product_recipe"
 -- Seed cake (6 產品)
 -- 組合盒「A+B」→ A × 1 + B × 1
 -- 單口味盒「A」→ A × 2
+-- 注意：cake_bar 產品名稱含「（條）」後綴（如「經典原味（條）」），比對時需剝除
 INSERT INTO product_recipe (product_id, ingredient_id, quantity_per_unit)
 SELECT c.id, cb.id, CASE
-  WHEN c.name = cb.name THEN 2
-  WHEN c.name LIKE cb.name || '+%' THEN 1
-  WHEN c.name LIKE '%+' || cb.name THEN 1
+  WHEN c.name = REPLACE(cb.name, '（條）', '') THEN 2
+  WHEN c.name LIKE REPLACE(cb.name, '（條）', '') || '+%' THEN 1
+  WHEN c.name LIKE '%+' || REPLACE(cb.name, '（條）', '') THEN 1
 END
 FROM products c
 JOIN products cb ON cb.category = 'cake_bar' AND cb.is_active = true
 WHERE c.category = 'cake' AND c.is_active = true
-  AND (c.name = cb.name OR c.name LIKE cb.name || '+%' OR c.name LIKE '%+' || cb.name);
+  AND (c.name = REPLACE(cb.name, '（條）', '')
+       OR c.name LIKE REPLACE(cb.name, '（條）', '') || '+%'
+       OR c.name LIKE '%+' || REPLACE(cb.name, '（條）', ''))
+ON CONFLICT (product_id, ingredient_id) DO NOTHING;
 
 -- Seed tube (3 產品)
 INSERT INTO product_recipe (product_id, ingredient_id, quantity_per_unit)
@@ -41,7 +45,8 @@ SELECT t.id, cb.id, 1
 FROM products t
 JOIN products cb ON cb.category = 'cake_bar' AND cb.is_active = true
 WHERE t.category = 'tube' AND t.is_active = true
-  AND REPLACE(t.name, '旋轉筒-', '') = cb.name;
+  AND REPLACE(t.name, '旋轉筒-', '') = REPLACE(cb.name, '（條）', '')
+ON CONFLICT (product_id, ingredient_id) DO NOTHING;
 
 -- Seed single_cake (3 產品)
 INSERT INTO product_recipe (product_id, ingredient_id, quantity_per_unit)
@@ -49,4 +54,5 @@ SELECT s.id, cb.id, 0.25
 FROM products s
 JOIN products cb ON cb.category = 'cake_bar' AND cb.is_active = true
 WHERE s.category = 'single_cake' AND s.is_active = true
-  AND REPLACE(s.name, '單入-', '') = cb.name;
+  AND REPLACE(s.name, '單入-', '') = REPLACE(cb.name, '（條）', '')
+ON CONFLICT (product_id, ingredient_id) DO NOTHING;
