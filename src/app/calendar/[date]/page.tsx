@@ -21,16 +21,15 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-
-/** Extract flavor keywords from product name by category */
-function extractFlavors(name: string, category: string): string[] {
-  if (category === 'cake') return name.split('+').map(s => s.trim())
-  if (category === 'tube' || category === 'single_cake') {
-    const idx = name.indexOf('-')
-    return idx >= 0 ? [name.slice(idx + 1).trim()] : []
-  }
-  return []
-}
+import type { ProductRecipe } from '@/lib/types'
+import {
+  calculateIngredientDeductions,
+  calculateMaterialDeductions as calcMaterialDeductionsHelper,
+  applyIngredientDeductions as applyIngredientDeductionsHelper,
+  applyMaterialDeductions as applyMaterialDeductionsHelper,
+  reverseIngredientDeductions as reverseIngredientDeductionsHelper,
+  reverseMaterialDeductions as reverseMaterialDeductionsHelper,
+} from '@/lib/stock'
 
 interface OrderRow {
   id: string
@@ -62,6 +61,7 @@ export default function DayOrderPage() {
   const [packagingStyles, setPackagingStyles] = useState<any[]>([])
   const [brandingStyles, setBrandingStyles] = useState<any[]>([])
   const [materialUsages, setMaterialUsages] = useState<{ product_id: string; material_id: string; packaging_style_id: string | null; quantity_per_unit: number }[]>([])
+  const [recipes, setRecipes] = useState<ProductRecipe[]>([])
   const [materialWarning, setMaterialWarning] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -136,11 +136,13 @@ export default function DayOrderPage() {
       supabase.from('packaging_styles').select('*').eq('is_active', true),
       supabase.from('branding_styles').select('*').eq('is_active', true),
       supabase.from('product_material_usage').select('product_id, material_id, packaging_style_id, quantity_per_unit'),
-    ]).then(([pr, pk, br, mu]) => {
+      supabase.from('product_recipe').select('id, product_id, ingredient_id, quantity_per_unit, created_at'),
+    ]).then(([pr, pk, br, mu, rc]) => {
       if (pr.data) setProducts(pr.data)
       if (pk.data) setPackagingStyles(pk.data)
       if (br.data) setBrandingStyles(br.data)
       if (mu.data) setMaterialUsages(mu.data)
+      if (rc.data) setRecipes(rc.data as ProductRecipe[])
     })
   }, [])
 
@@ -217,49 +219,23 @@ export default function DayOrderPage() {
   // ─── Inventory deduction ────────────────────────────
 
   const calculateDeductions = (itemEntries: [string, number][], tubePackagingId?: string) => {
-    const cakeBarProducts = products.filter(p => p.category === 'cake_bar')
-    const tubePkgProducts = products.filter(p => p.category === 'tube_pkg')
-    const deductions: Record<string, number> = {}
+    // 原料扣減：透過 product_recipe 展開（資料驅動）
+    const deductions: Record<string, number> = calculateIngredientDeductions(itemEntries, recipes)
 
+    // tube_pkg 扣減：保留現狀（按訂單 tube_packaging_id 對應包裝款式名稱，扣同名 tube_pkg 產品）
+    // 這是 per-packaging 屬性，不在 recipe 內
     let totalTubes = 0
-
     for (const [productId, qty] of itemEntries) {
       if (qty <= 0) continue
       const product = products.find((p: any) => p.id === productId)
-      if (!product) continue
-
-      // cake_bar deduction (cake boxes and single cakes consume cake bars)
-      if (product.category === 'cake' || product.category === 'single_cake') {
-        const flavors = extractFlavors(product.name, product.category)
-        // cake: 1 box = 2 bars total, divided among flavors (dual=1 each, single=2 same)
-        const barPerUnit = product.category === 'cake' ? 2 / flavors.length : 0.25
-        for (const flavor of flavors) {
-          const bar = cakeBarProducts.find((b: any) => b.name.includes(flavor))
-          if (bar) {
-            deductions[bar.id] = (deductions[bar.id] || 0) + qty * barPerUnit
-          }
-        }
-      }
-
-      // Count total tubes for packaging deduction
-      if (product.category === 'tube') {
-        totalTubes += qty
-        // Also deduct cake_bar for tubes (1 bar per tube)
-        const flavors = extractFlavors(product.name, product.category)
-        for (const flavor of flavors) {
-          const bar = cakeBarProducts.find((b: any) => b.name.includes(flavor))
-          if (bar) {
-            deductions[bar.id] = (deductions[bar.id] || 0) + qty
-          }
-        }
-      }
+      if (product?.category === 'tube') totalTubes += qty
     }
 
-    // Tube packaging deduction: deduct from tube_pkg product matching the selected style
     if (tubePackagingId && totalTubes > 0) {
-      const pkgStyleName = packagingStyles.find(ps => ps.id === tubePackagingId)?.name
+      const pkgStyleName = packagingStyles.find((ps) => ps.id === tubePackagingId)?.name
       if (pkgStyleName) {
-        const tubePkg = tubePkgProducts.find(p => p.name === pkgStyleName)
+        const tubePkgProducts = products.filter((p: any) => p.category === 'tube_pkg')
+        const tubePkg = tubePkgProducts.find((p: any) => p.name === pkgStyleName)
         if (tubePkg) {
           deductions[tubePkg.id] = (deductions[tubePkg.id] || 0) + totalTubes
         }
@@ -270,22 +246,11 @@ export default function DayOrderPage() {
   }
 
   const applyDeductions = async (orderId: string, deductions: Record<string, number>, orderDate: string) => {
-    const records = Object.entries(deductions)
-      .filter(([, qty]) => qty > 0)
-      .map(([productId, qty]) => ({
-        product_id: productId,
-        date: orderDate,
-        type: 'outbound' as const,
-        quantity: -qty,
-        reference_note: `order:${orderId}`,
-      }))
-    if (records.length > 0) {
-      await supabase.from('inventory').insert(records)
-    }
+    await applyIngredientDeductionsHelper(supabase, deductions, `order:${orderId}`, orderDate)
   }
 
   const reverseDeductions = async (orderId: string) => {
-    await supabase.from('inventory').delete().eq('reference_note', `order:${orderId}`)
+    await reverseIngredientDeductionsHelper(supabase, `order:${orderId}`)
   }
 
   // ─── Packaging material deduction ─────────────────────
@@ -296,59 +261,28 @@ export default function DayOrderPage() {
     orderTubePackagingId?: string,
     singleCakePackagingMap?: Record<string, string>,
   ) => {
-    const deductions: Record<string, number> = {}
-    const missingCombos: { productName: string; packagingName: string | null }[] = []
-
-    for (const [productId, qty] of itemEntries) {
-      if (qty <= 0) continue
-      const product = products.find((p: any) => p.id === productId)
-      if (!product) continue
-      if (product.category === 'cake_bar' || product.category === 'tube_pkg') continue
-
-      let pkgStyleId: string | undefined
-      if (product.category === 'cake') pkgStyleId = orderCakePackagingId
-      else if (product.category === 'tube') pkgStyleId = orderTubePackagingId
-      else if (product.category === 'single_cake') pkgStyleId = singleCakePackagingMap?.[productId]
-
-      // Match both specific (packaging_style_id=Y) and universal (null) usages — additive by design
-      const matched = materialUsages.filter(
-        u => u.product_id === productId
-          && (u.packaging_style_id === (pkgStyleId || null) || u.packaging_style_id === null)
-      )
-
-      if (matched.length === 0) {
-        const pkgName = pkgStyleId
-          ? packagingStyles.find(ps => ps.id === pkgStyleId)?.name ?? null
-          : null
-        missingCombos.push({ productName: product.name, packagingName: pkgName })
-      }
-
-      for (const usage of matched) {
-        deductions[usage.material_id] =
-          (deductions[usage.material_id] || 0) + qty * usage.quantity_per_unit
-      }
-    }
-
-    return { deductions, missingCombos }
+    return calcMaterialDeductionsHelper(
+      itemEntries,
+      products,
+      materialUsages as any,
+      (productId) => {
+        const product = products.find((p) => p.id === productId)
+        if (!product) return null
+        if (product.category === 'cake') return orderCakePackagingId ?? null
+        if (product.category === 'tube') return orderTubePackagingId ?? null
+        if (product.category === 'single_cake') return singleCakePackagingMap?.[productId] ?? null
+        return null
+      },
+      (id) => packagingStyles.find((ps) => ps.id === id)?.name ?? null,
+    )
   }
 
   const applyMaterialDeductions = async (orderId: string, deductions: Record<string, number>, orderDate: string) => {
-    const records = Object.entries(deductions)
-      .filter(([, qty]) => qty > 0)
-      .map(([materialId, qty]) => ({
-        material_id: materialId,
-        date: orderDate,
-        type: 'outbound' as const,
-        quantity: -Math.round(qty * 100) / 100,
-        reference_note: `order:${orderId}`,
-      }))
-    if (records.length > 0) {
-      await supabase.from('packaging_material_inventory').insert(records)
-    }
+    await applyMaterialDeductionsHelper(supabase, deductions, `order:${orderId}`, orderDate)
   }
 
   const reverseMaterialDeductions = async (orderId: string) => {
-    await supabase.from('packaging_material_inventory').delete().eq('reference_note', `order:${orderId}`)
+    await reverseMaterialDeductionsHelper(supabase, `order:${orderId}`)
   }
 
   const showMaterialWarnings = (combos: { productName: string; packagingName: string | null }[]) => {
