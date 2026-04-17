@@ -107,3 +107,33 @@ export interface DaySummary {
   tube_total: number
   pending_count: number
 }
+
+export type AdjustmentType = 'sample' | 'waste'
+export type DeductMode = 'finished' | 'ingredient'
+
+export interface ProductRecipe {
+  id: string
+  product_id: string
+  ingredient_id: string
+  quantity_per_unit: number
+  created_at: string
+  ingredient?: Product
+}
+
+export interface StockAdjustment {
+  id: string
+  date: string
+  adjustment_type: AdjustmentType
+  note: string | null
+  created_at: string
+  items?: StockAdjustmentItem[]
+}
+
+export interface StockAdjustmentItem {
+  id: string
+  adjustment_id: string
+  product_id: string
+  quantity: number
+  deduct_mode: DeductMode
+  product?: Product
+}
