@@ -283,22 +283,133 @@ export default function SettingsPage() {
 
   // --- Product CRUD --------------------------------------------------------
 
+  const saveProductEdit = async () => {
+    if (!editingProductId) return
+    const trimmed = newProductName.trim()
+    if (!trimmed) return
+
+    // 1. Update products.name
+    const { error: nameErr } = await supabase
+      .from('products')
+      .update({ name: trimmed })
+      .eq('id', editingProductId)
+    if (nameErr) {
+      alert(`更新名稱失敗：${nameErr.message}`)
+      return
+    }
+
+    // 2. Replace product_recipe（delete + insert）
+    await supabase.from('product_recipe').delete().eq('product_id', editingProductId)
+    const recipeRows = newProductRecipes
+      .filter((r) => r.ingredientId && parseFloat(r.qty) > 0)
+      .map((r) => ({
+        product_id: editingProductId,
+        ingredient_id: r.ingredientId,
+        quantity_per_unit: parseFloat(r.qty),
+      }))
+    if (recipeRows.length > 0) {
+      const { error } = await supabase.from('product_recipe').insert(recipeRows)
+      if (error) {
+        alert(`更新原料配方失敗：${error.message}`)
+        return
+      }
+    }
+
+    // 3. Replace product_material_usage（delete + insert）
+    await supabase.from('product_material_usage').delete().eq('product_id', editingProductId)
+    const materialRows = newProductMaterials
+      .filter((m) => m.materialId && parseFloat(m.qty) > 0)
+      .map((m) => ({
+        product_id: editingProductId,
+        material_id: m.materialId,
+        packaging_style_id: m.packagingStyleId || null,
+        quantity_per_unit: parseFloat(m.qty),
+      }))
+    if (materialRows.length > 0) {
+      const { error } = await supabase.from('product_material_usage').insert(materialRows)
+      if (error) {
+        alert(`更新包材對照失敗：${error.message}`)
+        return
+      }
+    }
+
+    resetProductForm()
+    setProductDialogOpen(false)
+    fetchProducts()
+    fetchRecipes()
+    fetchMaterialUsages()
+  }
+
   const addProduct = async () => {
     const trimmed = newProductName.trim()
     if (!trimmed || !newProductCategory) return
-    const { error } = await supabase.from('products').insert({
-      category: newProductCategory,
-      name: trimmed,
-      sort_order: 99,
-    })
-    if (error) {
-      alert(`新增失敗：${error.message}`)
+
+    // 編輯模式走另一個 handler
+    if (editingProductId) {
+      await saveProductEdit()
       return
     }
-    setNewProductName('')
-    setNewProductCategory('')
+
+    // ─── 新增模式：三段寫入 ───
+
+    // 1. Insert products
+    const { data: productRow, error: prodErr } = await supabase
+      .from('products')
+      .insert({ category: newProductCategory, name: trimmed, sort_order: 99 })
+      .select()
+      .single()
+
+    if (prodErr || !productRow) {
+      alert(`新增產品失敗：${prodErr?.message ?? 'unknown'}`)
+      return
+    }
+    const newProductId = productRow.id
+
+    // 2. Insert product_recipe（若有）
+    const recipeRows = newProductRecipes
+      .filter((r) => r.ingredientId && parseFloat(r.qty) > 0)
+      .map((r) => ({
+        product_id: newProductId,
+        ingredient_id: r.ingredientId,
+        quantity_per_unit: parseFloat(r.qty),
+      }))
+
+    if (recipeRows.length > 0) {
+      const { error: recipeErr } = await supabase.from('product_recipe').insert(recipeRows)
+      if (recipeErr) {
+        // Rollback: 刪除剛建的 product
+        await supabase.from('products').delete().eq('id', newProductId)
+        alert(`新增原料配方失敗，已還原：${recipeErr.message}`)
+        return
+      }
+    }
+
+    // 3. Insert product_material_usage（若有）
+    const materialRows = newProductMaterials
+      .filter((m) => m.materialId && parseFloat(m.qty) > 0)
+      .map((m) => ({
+        product_id: newProductId,
+        material_id: m.materialId,
+        packaging_style_id: m.packagingStyleId || null,
+        quantity_per_unit: parseFloat(m.qty),
+      }))
+
+    if (materialRows.length > 0) {
+      const { error: matErr } = await supabase.from('product_material_usage').insert(materialRows)
+      if (matErr) {
+        // Rollback: 刪除 recipe + product
+        await supabase.from('product_recipe').delete().eq('product_id', newProductId)
+        await supabase.from('products').delete().eq('id', newProductId)
+        alert(`新增包材對照失敗，已還原：${matErr.message}`)
+        return
+      }
+    }
+
+    resetProductForm()
     setProductDialogOpen(false)
     fetchProducts()
+    fetchRecipes()
+    fetchMaterialUsages()
   }
 
   const updateProductName = async (id: string, name: string) => {
