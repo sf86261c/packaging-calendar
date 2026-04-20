@@ -14,8 +14,8 @@
 |------|------|
 | 前端 | Next.js 16 (App Router) + TypeScript |
 | UI | Tailwind CSS 4 + shadcn/ui (@base-ui/react) |
-| 資料庫 | Supabase (PostgreSQL) + RLS |
-| 認證 | Supabase Auth (email/password) |
+| 資料庫 | Supabase (PostgreSQL) + RLS（開放 anon 讀寫） |
+| 認證 | 無（公開內部工具，打開即可操作） |
 | 部署 | Vercel (Hobby plan, 自動 CI/CD) |
 | 圖表 | Recharts 3.8 |
 | 即時同步 | Supabase Realtime |
@@ -170,10 +170,11 @@ inventory        — 庫存紀錄 (product_id, date, type, quantity, reference_n
 product_recipe    — 原料配方 BOM (product_id, ingredient_id, quantity_per_unit)
                    ingredient_id 指向 cake_bar 或 tube_pkg 類別的 product
                    注意：cake_bar 名稱含「（條）」後綴，比對時需 REPLACE 剝除
-stock_adjustments — 試吃/耗損 (date, adjustment_type, note)
-                   adjustment_type: sample / waste
-stock_adjustment_items — 扣減項目 (adjustment_id, product_id, quantity, deduct_mode)
+stock_adjustments — 試吃/耗損/散單 (date, adjustment_type, note)
+                   adjustment_type: sample / waste / retail
+stock_adjustment_items — 扣減項目 (adjustment_id, product_id, quantity, deduct_mode, packaging_style_id)
                    deduct_mode: finished (透過 recipe 展開) / ingredient (直接扣)
+                   packaging_style_id: 成品扣減時指定包裝款式（用於包材對照）
 ```
 
 ### 包材相關表
@@ -199,7 +200,8 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 ### RLS 政策
 
 - 所有表啟用 Row Level Security
-- 已認證用戶可讀寫所有資料（團隊內部工具）
+- 政策改為 `TO anon, authenticated`（`FOR ALL USING (true) WITH CHECK (true)`）
+- 由於前端移除登入，anon 角色需可讀寫所有資料（團隊內部工具，不對外開放）
 
 ### Migrations
 
@@ -228,10 +230,9 @@ packaging-calendar/
 │   ├── app/
 │   │   ├── layout.tsx              # 根 layout + AppShell
 │   │   ├── page.tsx                # 重導到 /calendar
-│   │   ├── login/page.tsx          # 登入/註冊
 │   │   ├── calendar/
 │   │   │   ├── page.tsx            # 月曆視圖 (Realtime)
-│   │   │   └── [date]/page.tsx     # 日訂單管理 (CRUD+庫存+匯出+Realtime)
+│   │   │   └── [date]/page.tsx     # 日訂單管理 (CRUD+庫存+匯出+Realtime+試吃/耗損/散單)
 │   │   ├── search/page.tsx         # 客戶搜尋
 │   │   ├── dashboard/page.tsx      # 統計儀表板 (Recharts, 5卡片+4圖表)
 │   │   ├── inventory/page.tsx      # 產品庫存 (D+10+LINE叫貨+Realtime)
@@ -240,23 +241,29 @@ packaging-calendar/
 │   │   └── api/
 │   │       └── line-notify/route.ts # LINE 叫貨通知 API
 │   ├── components/
-│   │   ├── app-shell.tsx           # 側邊導航 + 頂部欄
+│   │   ├── app-shell.tsx           # 側邊導航 + 頂部欄（無登出按鈕）
+│   │   ├── stock-adjustment-dialog.tsx # 試吃/耗損/散單 Dialog
 │   │   └── ui/                     # shadcn/ui 元件 (20+, 基於 @base-ui/react)
 │   ├── lib/
+│   │   ├── stock.ts                # 庫存扣減共用 helper
 │   │   ├── supabase.ts             # 瀏覽器端 Supabase client
-│   │   ├── supabase-server.ts      # 伺服器端 Supabase client
+│   │   ├── supabase-server.ts      # 伺服器端 Supabase client（保留供未來用）
 │   │   ├── types.ts                # TypeScript 型別定義
 │   │   └── utils.ts                # 工具函數
-│   └── middleware.ts               # Auth 保護路由
-├── supabase/migrations/            # DB migration SQL (8 檔)
+│   └── （已移除 middleware.ts 與 proxy.ts — 無登入檢查）
+├── supabase/migrations/            # DB migration SQL (14 檔)
 ├── .env.local                      # Supabase URL + Key + LINE Token（不進 git）
 └── package.json
 ```
 
-## Git 提交歷史
+## Git 提交歷史（最近）
 
 ```
-xxxxxxx feat: 蜂蜜蛋糕(盒)新增單口味品項，修正庫存扣減邏輯
+38cae6e feat: 新增散單類型並移除登入功能
+650e4d0 fix(db): migration 012 加 IF NOT EXISTS 以支援重複執行
+9e3d945 feat(adjust): 試吃/耗損成品過濾為試吃品+曲奇；cake/tube 支援選包裝扣對應包材
+c5fca47 docs: 更新 LAD.md — /materials 移除用量對照說明
+ae14f88 refactor(materials): 移除用量對照功能（已由設定頁面取代）
 1c77fe4 refactor: 抽出 showMaterialWarnings helper，加註解釐清匹配邏輯
 0f5ec8d feat: 訂單建立/編輯/刪除時自動扣減包材庫存
 1cc69b2 feat: 包裝/烙印款式新增適用類別關聯，移除硬編碼
@@ -264,15 +271,6 @@ xxxxxxx feat: 蜂蜜蛋糕(盒)新增單口味品項，修正庫存扣減邏輯
 0bde37f feat: 包材庫存支援編輯和刪除功能
 a8676a7 feat: 統計儀表板新增旋轉筒出貨統計卡片與折線圖
 9328243 feat: 旋轉筒庫存改為追蹤包裝款式，訂單保留口味名稱
-d4fedaa fix: 旋轉筒保留口味名稱、單入蛋糕支援每口味獨立包裝款式
-e43e92c feat: 旋轉筒改包裝款式名稱、曲奇排序調整、庫存歷史日期查詢
-7336cae fix: 修復所有 Select 下拉選單顯示 UUID 代碼問題
-fabf02b docs: 更新 LAD.md 反映所有已完成功能
-9665e4f feat: 完成所有待辦功能 — 訂單編輯、庫存扣減、Recharts、CRUD、Realtime
-5e753b8 fix: 統計和搜尋頁面移除舊的 packaging_id join
-e5538f5 feat: 每個產品類別獨立包裝/烙印欄位
-3af9427 fix: 烙印款式僅蛋糕有數量時可選，修復Select顯示UUID問題
-a370061 feat: 更新產品結構和訂單管理
 082a870 feat: 包裝行事曆 Web 應用初始版本
 ```
 
@@ -388,7 +386,40 @@ ALTER TABLE packaging_materials
 -- === Migration 011: stock_adjustments ===
 -- (完整 SQL 見 supabase/migrations/011_stock_adjustments.sql)
 -- 要點：建 stock_adjustments 父子表 + RLS + CHECK constraints
+
+-- === Migration 012: stock_adjustment_items 加 packaging_style_id ===
+ALTER TABLE stock_adjustment_items
+  ADD COLUMN IF NOT EXISTS packaging_style_id UUID REFERENCES packaging_styles(id);
+
+-- === Migration 013: adjustment_type 擴充散單(retail) ===
+ALTER TABLE stock_adjustments
+  DROP CONSTRAINT IF EXISTS stock_adjustments_adjustment_type_check;
+ALTER TABLE stock_adjustments
+  ADD CONSTRAINT stock_adjustments_adjustment_type_check
+  CHECK (adjustment_type IN ('sample', 'waste', 'retail'));
+
+-- === Migration 014: 移除登入，開放 anon 角色 ===
+-- (完整 SQL 見 supabase/migrations/014_open_public_access.sql)
+-- 要點：DO $$ 迴圈 drop 所有 table 的現有 policy，
+--       改為 FOR ALL TO anon, authenticated USING (true) WITH CHECK (true)
 ```
+
+## 變更紀錄
+
+### 2026-04-20 — 散單類型 + 移除登入
+
+- **新增散單類型**：`stock_adjustments.adjustment_type` 加入 `retail`（散單）
+  - Dialog 新增第三顆 radio「散單」，切換時 items 重置
+  - 散單時下拉僅顯示全部活躍 cake + tube + cookie（排除 cake_bar/tube_pkg/single_cake 及試吃品）
+  - 試吃/耗損仍維持原過濾（cake/tube 僅含「試吃」名稱 + cookie）
+  - 日頁面按鈕「🍰 今日試吃/耗損」→「🍰 今日試吃/耗損/散單」
+  - 卡片標題與 badge 顯示新增散單分支
+- **移除登入**：刪除 `src/proxy.ts`、`src/app/login/`；AppShell 移除登出按鈕
+  - RLS 改為 `TO anon, authenticated`（migration 014）
+  - Supabase anon key 本就 public，RLS `USING (true)` 搭配內部使用
+- **Migrations**
+  - 013 — `adjustment_type` CHECK 擴充 `retail`
+  - 014 — DO $$ 迴圈開放 12 張表的 policy 給 anon + authenticated
 
 ## 效能優化紀錄（2026-04-15）
 
@@ -408,14 +439,13 @@ ALTER TABLE packaging_materials
 
 | 修正 | 檔案 | 效果 |
 |------|------|------|
-| Middleware 改為輕量 cookie 檢查 | `src/middleware.ts` | 省下每次切頁 ~200ms Supabase Auth 往返 |
+| Middleware 改為輕量 cookie 檢查（已於 2026-04-20 整個刪除） | ~~`src/middleware.ts`~~ / ~~`src/proxy.ts`~~ | 省下每次切頁 ~200ms Supabase Auth 往返；後續再移除整個檔案 |
 | Browser client module-level singleton | `src/lib/supabase.ts` | 避免重複建立 GoTrueClient、減少記憶體 |
 | 全域 `loading.tsx` 骨架屏 | `src/app/loading.tsx` | 切頁時立即顯示 spinner，消除白屏 |
 | 拆分 Realtime 與 data fetch useEffect | `calendar/page.tsx`、`inventory/page.tsx` | Channel 只在 mount 時建一次，依賴變動不再重建 |
 | 拆分 static data 只抓一次 | `calendar/[date]/page.tsx` | products/packaging/branding/usages 只在 mount 時抓，不隨日期重抓 |
 | Date filter-bound realtime | `calendar/[date]/page.tsx` | Channel 隨 dateStr 重建但 ref 永遠指向最新 fetchOrders |
 | `next.config.ts` 加優化 | `next.config.ts` | `optimizePackageImports` 涵蓋 @base-ui/react、recharts、lucide-react、date-fns；關 poweredByHeader；啟 compress |
-| matcher 排除靜態資源 | `src/middleware.ts` | API/css/js/字型不再觸發 middleware |
 
 ### 預期效果
 
@@ -426,33 +456,34 @@ ALTER TABLE packaging_materials
 
 ### 取捨說明
 
-Middleware 的驗證從「呼叫 Supabase `getUser()` 驗證 JWT」改為「cookie 存在即放行」：
-- 安全性由 Supabase RLS 在 DB 層把關（已啟用）
-- 若 cookie 被 tamper，瀏覽器端 Supabase SDK 的 API 呼叫仍會失敗（401）
-- 適用內部工具情境；若未來轉對外服務，須恢復 `getUser()`
+原本的 middleware 驗證從「呼叫 Supabase `getUser()` 驗證 JWT」改為「cookie 存在即放行」，
+**於 2026-04-20 整個 middleware / proxy 檔案刪除、登入頁移除**：
+
+- 安全性由 Supabase RLS 在 DB 層把關（anon 全權限讀寫）
+- 適用內部工具情境；若未來轉對外服務，須恢復 `createServerClient().auth.getUser()` 並收斂 RLS
+- `src/lib/supabase-server.ts` 保留但暫未被引用（api/line-notify 用 service role key 直連）
 
 ## 已知限制
 
-1. **middleware 警告** — Next.js 16 建議用 `proxy` 取代 `middleware`，功能正常但有警告
-2. **Supabase email 確認** — 預設需要 email 確認，可在 Authentication > Providers > Email 關閉 "Confirm email"
-3. **base-ui Select 顯示** — `@base-ui/react` 的 SelectValue 不會自動顯示 ItemText，需在 children 中手動解析 UUID → 名稱
-4. **Realtime 需手動啟用** — 需在 Supabase Dashboard > Database > Publications 中將相關表加入 `supabase_realtime` publication
+1. **公開存取** — 已移除登入，RLS 對 anon 全開；請確保此網站僅供內部團隊使用（不對外分享）
+2. **base-ui Select 顯示** — `@base-ui/react` 的 SelectValue 不會自動顯示 ItemText，需在 children 中手動解析 UUID → 名稱
+3. **Realtime 需手動啟用** — 需在 Supabase Dashboard > Database > Publications 中將相關表加入 `supabase_realtime` publication
 
 ## 未完成事項
 
 ### 高優先
 
-（目前無）
+1. **Migration 013/014 執行** — 在 Supabase Dashboard > SQL Editor 手動執行，否則散單無法儲存 / 未登入無法讀寫資料
 
 ### 中優先
 
-1. **Realtime 啟用** — 需在 Supabase Dashboard 手動啟用相關表的 Realtime（`orders`, `order_items`, `inventory`）
+1. **Realtime 啟用** — 需在 Supabase Dashboard 手動啟用相關表的 Realtime（`orders`, `order_items`, `inventory`, `stock_adjustments`, `stock_adjustment_items`）
 
 ### 低優先
 
-3. **middleware 遷移** — Next.js 16 建議將 `middleware.ts` 改為 `proxy` 模式
-4. **自訂域名** — 可在 Vercel Dashboard > Domains 設定
-5. **匯出格式擴充** — 目前僅支援 CSV，可考慮加入 PDF 列印排版
+1. **自訂域名** — 可在 Vercel Dashboard > Domains 設定
+2. **匯出格式擴充** — 目前僅支援 CSV，可考慮加入 PDF 列印排版
+3. **散單 tube_pkg 扣減** — 目前散單選旋轉筒時僅扣 cake_bar 原料，未扣 tube_pkg 包裝庫存（繼承自試吃/耗損邏輯）
 
 ## 環境資訊
 
@@ -478,10 +509,12 @@ Middleware 的驗證從「呼叫 Supabase `getUser()` 驗證 JWT」改為「cook
 在 Supabase Dashboard 中：
 1. 前往 Database > Publications
 2. 點選 `supabase_realtime` publication
-3. 將 `orders`、`order_items`、`inventory` 加入
+3. 將 `orders`、`order_items`、`inventory`、`stock_adjustments`、`stock_adjustment_items` 加入
 4. 或直接在 SQL Editor 執行：
 ```sql
 ALTER PUBLICATION supabase_realtime ADD TABLE orders;
 ALTER PUBLICATION supabase_realtime ADD TABLE order_items;
 ALTER PUBLICATION supabase_realtime ADD TABLE inventory;
+ALTER PUBLICATION supabase_realtime ADD TABLE stock_adjustments;
+ALTER PUBLICATION supabase_realtime ADD TABLE stock_adjustment_items;
 ```
