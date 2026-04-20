@@ -26,9 +26,8 @@
 
 | 頁面 | 路由 | 狀態 | 說明 |
 |------|------|------|------|
-| 登入/註冊 | `/login` | ✅ 完成 | Supabase Auth，email/password |
 | 月曆視圖 | `/calendar` | ✅ 完成 | 月份切換、每日訂單摘要、Realtime、響應式 |
-| 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除、**資料驅動庫存扣減（product_recipe）**、CSV匯出、Realtime、**今日試吃/耗損 CRUD** |
+| 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除、**資料驅動庫存扣減（product_recipe）**、CSV匯出、Realtime、**今日試吃/耗損/散單 CRUD** |
 | 客戶搜尋 | `/search` | ✅ 完成 | 即時搜尋(ilike)、點擊跳轉日期頁 |
 | 統計儀表板 | `/dashboard` | ✅ 完成 | 6 統計卡片 + 5 Recharts 圖表（含試吃統計） |
 | 產品庫存 | `/inventory` | ✅ 完成 | 蛋糕條/曲奇/旋轉筒包裝庫存、日期查詢、Realtime |
@@ -83,16 +82,17 @@
 - **狀態欄**：自由輸入框
 - **列印勾選**：checkbox，勾選後整列背景變黃色
 
-### 試吃/耗損功能（非訂單庫存扣減）
+### 試吃/耗損/散單功能（非訂單庫存扣減）
 
-- **類型**：`sample`（試吃）/ `waste`（耗損）分開記錄，可分別做報表分析
+- **類型**：`sample`（試吃）/ `waste`（耗損）/ `retail`（散單）分開記錄，可分別做報表分析
+- **散單產品清單**：切為 `retail` 時下拉僅顯示蜂蜜蛋糕(盒)(cake) + 旋轉筒(tube) + 曲奇(cookie) 全部活躍品項
 - **扣減模式**：
   - 「扣成品」→ 透過 `product_recipe` 展開為原料扣減 + 透過 `product_material_usage` 展開為包材扣減
   - 「扣原料」→ 直接扣 `cake_bar` / `tube_pkg` 產品庫存
   - 包材耗損暫不支援（未來視需求在 `/materials` 頁面另開入口）
 - **資料表**：`stock_adjustments`（父：date, adjustment_type, note）+ `stock_adjustment_items`（子：product_id, quantity, deduct_mode）
 - **reference_note 格式**：`adjust:${adjustmentId}`
-- 日頁面（`/calendar/[date]`）右上角「🍰 今日試吃/耗損」按鈕開啟 Dialog，列表顯示於訂單卡片下方，支援編輯/刪除
+- 日頁面（`/calendar/[date]`）右上角「🍰 今日試吃/耗損/散單」按鈕開啟 Dialog，列表顯示於訂單卡片下方，支援編輯/刪除
 
 ### Realtime 同步
 
@@ -216,6 +216,9 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `009_material_lead_time.sql` | packaging_materials 新增 lead_time_days 欄位（預設 7 天） |
 | `010_product_recipe.sql` | 新增 product_recipe 表、seed 15 筆既有產品配方（6 cake + 3 tube + 3 single_cake，處理「（條）」後綴匹配） |
 | `011_stock_adjustments.sql` | 新增 stock_adjustments + stock_adjustment_items 父子表 + RLS + CHECK constraints |
+| `012_stock_adjustment_packaging.sql` | stock_adjustment_items 新增 packaging_style_id（試吃/耗損成品扣包材用） |
+| `013_stock_adjustment_retail.sql` | 擴充 adjustment_type 支援 retail（散單） |
+| `014_open_public_access.sql` | 移除登入後開放 anon 角色讀寫（所有資料表） |
 
 ## 檔案結構
 

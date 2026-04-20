@@ -668,7 +668,7 @@ export default function DayOrderPage() {
                   setAdjustmentDialogOpen(true)
                 }}
               >
-                🍰 今日試吃/耗損
+                🍰 今日試吃/耗損/散單
               </Button>
             </div>
           </CardHeader>
@@ -774,14 +774,26 @@ export default function DayOrderPage() {
       {adjustments.length > 0 && (
         <Card className="mt-4">
           <CardHeader>
-            <CardTitle className="text-base">今日試吃 / 耗損</CardTitle>
+            <CardTitle className="text-base">今日試吃 / 耗損 / 散單</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {adjustments.map((a) => (
               <div key={a.id} className="flex items-center justify-between rounded-lg border p-2 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={a.adjustment_type === 'sample' ? 'default' : 'destructive'}>
-                    {a.adjustment_type === 'sample' ? '試吃' : '耗損'}
+                  <Badge
+                    variant={
+                      a.adjustment_type === 'sample'
+                        ? 'default'
+                        : a.adjustment_type === 'retail'
+                          ? 'secondary'
+                          : 'destructive'
+                    }
+                  >
+                    {a.adjustment_type === 'sample'
+                      ? '試吃'
+                      : a.adjustment_type === 'retail'
+                        ? '散單'
+                        : '耗損'}
                   </Badge>
                   <span className="text-gray-700">
                     {a.items.map((it) => {

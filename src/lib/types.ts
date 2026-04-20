@@ -108,7 +108,7 @@ export interface DaySummary {
   pending_count: number
 }
 
-export type AdjustmentType = 'sample' | 'waste'
+export type AdjustmentType = 'sample' | 'waste' | 'retail'
 export type DeductMode = 'finished' | 'ingredient'
 
 export interface ProductRecipe {

@@ -85,9 +85,14 @@ export function StockAdjustmentDialog({
     }
   }
 
-  // 成品：僅列蜂蜜蛋糕試吃(cake 含"試吃")、旋轉筒試吃(tube 含"試吃")、所有曲奇
+  // 成品：
+  // - 散單：全部活躍的 蜂蜜蛋糕(cake) + 旋轉筒(tube) + 曲奇(cookie)
+  // - 試吃 / 耗損：僅列蜂蜜蛋糕試吃(cake 含"試吃")、旋轉筒試吃(tube 含"試吃")、所有曲奇
   const finishedProducts = products.filter((p) => {
     if (!p.is_active) return false
+    if (adjustmentType === 'retail') {
+      return p.category === 'cake' || p.category === 'tube' || p.category === 'cookie'
+    }
     if (p.category === 'cookie') return true
     if ((p.category === 'cake' || p.category === 'tube') && p.name.includes('試吃')) return true
     return false
@@ -106,7 +111,7 @@ export function StockAdjustmentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[calc(100%-1rem)] max-w-xl max-h-[90vh] overflow-y-auto overflow-x-hidden bg-white">
         <DialogHeader>
-          <DialogTitle>今日試吃 / 耗損</DialogTitle>
+          <DialogTitle>今日試吃 / 耗損 / 散單</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-1.5">
@@ -116,7 +121,10 @@ export function StockAdjustmentDialog({
                 <input
                   type="radio"
                   checked={adjustmentType === 'sample'}
-                  onChange={() => setAdjustmentType('sample')}
+                  onChange={() => {
+                    setAdjustmentType('sample')
+                    setItems([{ productId: '', quantity: '1', deductMode: 'finished', packagingStyleId: '' }])
+                  }}
                 />
                 試吃
               </label>
@@ -124,9 +132,23 @@ export function StockAdjustmentDialog({
                 <input
                   type="radio"
                   checked={adjustmentType === 'waste'}
-                  onChange={() => setAdjustmentType('waste')}
+                  onChange={() => {
+                    setAdjustmentType('waste')
+                    setItems([{ productId: '', quantity: '1', deductMode: 'finished', packagingStyleId: '' }])
+                  }}
                 />
                 耗損
+              </label>
+              <label className="flex items-center gap-1.5 text-sm">
+                <input
+                  type="radio"
+                  checked={adjustmentType === 'retail'}
+                  onChange={() => {
+                    setAdjustmentType('retail')
+                    setItems([{ productId: '', quantity: '1', deductMode: 'finished', packagingStyleId: '' }])
+                  }}
+                />
+                散單
               </label>
             </div>
           </div>

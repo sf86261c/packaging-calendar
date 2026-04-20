@@ -2,11 +2,10 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase'
+import { usePathname } from 'next/navigation'
 import {
   Calendar, Search, BarChart3, Package, Boxes, Settings,
-  Menu, X, LogOut
+  Menu,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
@@ -22,20 +21,7 @@ const navItems = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const router = useRouter()
-  const supabase = createClient()
   const [mobileOpen, setMobileOpen] = useState(false)
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    router.push('/login')
-    router.refresh()
-  }
-
-  // Skip shell for login page
-  if (pathname === '/login') {
-    return <>{children}</>
-  }
 
   const NavLinks = () => (
     <nav className="flex flex-col gap-1 p-3">
@@ -75,19 +61,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Top bar */}
-          <header className="flex h-14 items-center justify-between border-b border-gray-200 bg-white px-4">
+          <header className="flex h-14 items-center justify-between border-b border-gray-200 bg-white px-4 md:hidden">
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileOpen(true)}>
+              <Button variant="ghost" size="icon" onClick={() => setMobileOpen(true)}>
                 <Menu className="h-5 w-5" />
               </Button>
-              <span className="text-sm font-medium text-gray-700 md:hidden">
+              <span className="text-sm font-medium text-gray-700">
                 📦 包裝行事曆
               </span>
             </div>
-            <Button variant="ghost" size="sm" className="text-gray-500" onClick={handleLogout}>
-              <LogOut className="mr-2 h-4 w-4" />
-              登出
-            </Button>
           </header>
 
           {/* Main content */}
