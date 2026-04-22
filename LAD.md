@@ -221,6 +221,8 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `012_stock_adjustment_packaging.sql` | stock_adjustment_items 新增 packaging_style_id（試吃/耗損成品扣包材用） |
 | `013_stock_adjustment_retail.sql` | 擴充 adjustment_type 支援 retail（散單） |
 | `014_open_public_access.sql` | 移除登入後開放 anon 角色讀寫（所有資料表） |
+| `015_fix_tube_pkg_data.sql` | 啟用 3 個 tube_pkg 產品，將「馬戲團」改名為「樂園馬戲」對齊 packaging_styles |
+| `016_inventory_rpc.sql` | 新增 4 個 RPC functions（atomic transaction）：replace/delete order/adjustment inventory |
 
 ## 檔案結構
 
@@ -406,6 +408,28 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-04-22 — 庫存扣減原子化 + 警示強化
+
+**對策（基於 code review 與 e2e 測試發現）**
+
+| 問題 | 對策 |
+|---|---|
+| reverse + apply 兩段獨立 await，中途斷線可能導致 inventory 永久遺失 | Migration 016 新增 4 個 plpgsql RPC，把 DELETE old + INSERT new 包成單一 transaction |
+| Supabase 寫入 error 全部不檢查，失敗無感 | OrderFormDialog / [date] 全部加 `try/catch` + 失敗 alert |
+| 月曆快速新增 dialog 缺 onWarning，包材警示被吞 | calendar/page.tsx 加 amber banner + 連接 onWarning callback |
+| 散單/試吃/耗損 finished mode 漏了 tube_pkg 扣減 | handleSaveAdjustment 補上 tube_pkg name-match 邏輯，與訂單路徑對齊 |
+| tube_pkg name-match 失敗（產品停用 / 名稱漂移）靜默無感 | 新增 missingTubePkg 警示，併入 amber banner 顯示 |
+| tube_pkg 三個產品全部 is_active=false，「馬戲團」與新名稱「樂園馬戲」不一致 | Migration 015 啟用 product + 改名對齊 |
+
+**Migrations（待 Dashboard 執行）**
+- `015_fix_tube_pkg_data.sql` — UPDATE products 修正 tube_pkg
+- `016_inventory_rpc.sql` — CREATE 4 個 RPC + GRANT EXECUTE TO anon
+
+**關聯檔案**
+- `src/lib/stock.ts`：新增 `replaceOrderInventory` / `deleteOrderWithInventory` / `replaceAdjustmentInventory` / `deleteAdjustmentWithInventory` RPC wrappers
+- `src/components/order-form-dialog.tsx`：handleSave 改用 RPC + try/catch + tube_pkg warning
+- `src/app/calendar/[date]/page.tsx`：handleSaveOrder / handleDelete / handleSaveAdjustment / handleDeleteAdjustment 全部改用 RPC + try/catch + finished mode 補 tube_pkg
+
 ### 2026-04-22 — 月曆 UX 強化
 
 **快速新增訂單**
@@ -486,16 +510,22 @@ ALTER TABLE stock_adjustments
 
 ## 未完成事項
 
+### 高優先 ⚠️
+
+1. **執行 Migration 015 + 016** — 在 Supabase Dashboard > SQL Editor：
+   - `015_fix_tube_pkg_data.sql`：未執行前所有旋轉筒訂單**未扣減 tube_pkg 包裝庫存**
+   - `016_inventory_rpc.sql`：未執行前 RPC 不存在，前端 `replaceOrderInventory` 等呼叫會 alert 錯誤
+
 ### 低優先
 
 1. **自訂域名** — 可在 Vercel Dashboard > Domains 設定
 2. **匯出格式擴充** — 目前僅支援 CSV，可考慮加入 PDF 列印排版
-3. **散單 tube_pkg 扣減** — 目前散單選旋轉筒時僅扣 cake_bar 原料，未扣 tube_pkg 包裝庫存（繼承自試吃/耗損邏輯）
 
-### 已完成（2026-04-22 確認）
+### 已完成
 
-- ✅ Migration 013/014 已於 Supabase Dashboard 執行
-- ✅ Realtime publication 已啟用 5 張表（`orders`, `order_items`, `inventory`, `stock_adjustments`, `stock_adjustment_items`）— 經端對端測試驗證
+- ✅ Migration 013/014 已於 Supabase Dashboard 執行（2026-04-22）
+- ✅ Realtime publication 已啟用 5 張表（2026-04-22 端對端測試驗證）
+- ✅ 散單/試吃/耗損 finished mode 補 tube_pkg 扣減（2026-04-22 程式碼修復，待 015 啟用 product 後生效）
 
 ## 環境資訊
 

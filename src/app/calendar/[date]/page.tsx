@@ -25,10 +25,10 @@ import type { ProductRecipe, ProductMaterialUsage, StockAdjustment, StockAdjustm
 import {
   calculateIngredientDeductions,
   calculateMaterialDeductions as calcMaterialDeductionsHelper,
-  applyIngredientDeductions as applyIngredientDeductionsHelper,
-  applyMaterialDeductions as applyMaterialDeductionsHelper,
-  reverseIngredientDeductions as reverseIngredientDeductionsHelper,
-  reverseMaterialDeductions as reverseMaterialDeductionsHelper,
+  replaceOrderInventory,
+  deleteOrderWithInventory,
+  replaceAdjustmentInventory,
+  deleteAdjustmentWithInventory,
 } from '@/lib/stock'
 import { StockAdjustmentDialog } from '@/components/stock-adjustment-dialog'
 import type { AdjustmentInput } from '@/components/stock-adjustment-dialog'
@@ -253,11 +253,9 @@ export default function DayOrderPage() {
   // ─── Inventory deduction ────────────────────────────
 
   const calculateDeductions = (itemEntries: [string, number][], tubePackagingId?: string) => {
-    // 原料扣減：透過 product_recipe 展開（資料驅動）
     const deductions: Record<string, number> = calculateIngredientDeductions(itemEntries, recipes)
+    const missingTubePkg: string[] = []
 
-    // tube_pkg 扣減：保留現狀（按訂單 tube_packaging_id 對應包裝款式名稱，扣同名 tube_pkg 產品）
-    // 這是 per-packaging 屬性，不在 recipe 內
     let totalTubes = 0
     for (const [productId, qty] of itemEntries) {
       if (qty <= 0) continue
@@ -268,23 +266,17 @@ export default function DayOrderPage() {
     if (tubePackagingId && totalTubes > 0) {
       const pkgStyleName = packagingStyles.find((ps) => ps.id === tubePackagingId)?.name
       if (pkgStyleName) {
-        const tubePkgProducts = products.filter((p: any) => p.category === 'tube_pkg')
-        const tubePkg = tubePkgProducts.find((p: any) => p.name === pkgStyleName)
+        const tubePkg = products.find((p: any) => p.category === 'tube_pkg' && p.name === pkgStyleName)
         if (tubePkg) {
           deductions[tubePkg.id] = (deductions[tubePkg.id] || 0) + totalTubes
+        } else {
+          // 名稱對不上或產品已停用 → 提示用戶
+          missingTubePkg.push(pkgStyleName)
         }
       }
     }
 
-    return deductions
-  }
-
-  const applyDeductions = async (orderId: string, deductions: Record<string, number>, orderDate: string) => {
-    await applyIngredientDeductionsHelper(supabase, deductions, `order:${orderId}`, orderDate)
-  }
-
-  const reverseDeductions = async (orderId: string) => {
-    await reverseIngredientDeductionsHelper(supabase, `order:${orderId}`)
+    return { deductions, missingTubePkg }
   }
 
   // ─── Packaging material deduction ─────────────────────
@@ -311,20 +303,22 @@ export default function DayOrderPage() {
     )
   }
 
-  const applyMaterialDeductions = async (orderId: string, deductions: Record<string, number>, orderDate: string) => {
-    await applyMaterialDeductionsHelper(supabase, deductions, `order:${orderId}`, orderDate)
-  }
-
-  const reverseMaterialDeductions = async (orderId: string) => {
-    await reverseMaterialDeductionsHelper(supabase, `order:${orderId}`)
-  }
-
-  const showMaterialWarnings = (combos: { productName: string; packagingName: string | null }[]) => {
-    if (combos.length === 0) return
-    const lines = combos.map(c =>
-      `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`
-    )
-    setMaterialWarning(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
+  const showInventoryWarnings = (
+    combos: { productName: string; packagingName: string | null }[],
+    missingTubePkg: string[] = [],
+  ) => {
+    const sections: string[] = []
+    if (combos.length > 0) {
+      const lines = combos.map(c =>
+        `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`
+      )
+      sections.push(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
+    }
+    if (missingTubePkg.length > 0) {
+      const lines = missingTubePkg.map(n => `· ${n}`)
+      sections.push(`以下旋轉筒包裝款式找不到對應的 tube_pkg 產品（已停用或名稱不符），未扣減包裝庫存：\n${lines.join('\n')}`)
+    }
+    if (sections.length > 0) setMaterialWarning(sections.join('\n\n'))
   }
 
   // ─── Save (add or edit) ─────────────────────────────
@@ -359,66 +353,57 @@ export default function DayOrderPage() {
         }
       })
 
-    if (editingOrderId) {
-      // ── Edit mode ──
-      await supabase.from('orders').update(orderData).eq('id', editingOrderId)
-      await supabase.from('order_items').delete().eq('order_id', editingOrderId)
-      if (itemEntries.length > 0) {
-        await supabase.from('order_items').insert(buildItemRows(editingOrderId))
+    try {
+      let orderId: string
+      if (editingOrderId) {
+        const r1 = await supabase.from('orders').update(orderData).eq('id', editingOrderId)
+        if (r1.error) throw new Error(`更新訂單失敗：${r1.error.message}`)
+        const r2 = await supabase.from('order_items').delete().eq('order_id', editingOrderId)
+        if (r2.error) throw new Error(`清除舊品項失敗：${r2.error.message}`)
+        if (itemEntries.length > 0) {
+          const r3 = await supabase.from('order_items').insert(buildItemRows(editingOrderId))
+          if (r3.error) throw new Error(`寫入品項失敗：${r3.error.message}`)
+        }
+        orderId = editingOrderId
+      } else {
+        const r = await supabase.from('orders').insert(orderData).select('id').single()
+        if (r.error || !r.data) throw new Error(`建立訂單失敗：${r.error?.message ?? 'no data returned'}`)
+        orderId = r.data.id
+        if (itemEntries.length > 0) {
+          const r2 = await supabase.from('order_items').insert(buildItemRows(orderId))
+          if (r2.error) throw new Error(`寫入品項失敗：${r2.error.message}`)
+        }
       }
-      // Product inventory
-      await reverseDeductions(editingOrderId)
-      const deductions = calculateDeductions(itemEntries, formTubePackaging || undefined)
-      await applyDeductions(editingOrderId, deductions, dateStr)
-      // Packaging material inventory
-      await reverseMaterialDeductions(editingOrderId)
+
+      const { deductions, missingTubePkg } = calculateDeductions(itemEntries, formTubePackaging || undefined)
       const matResult = calculateMaterialDeductions(
         itemEntries,
         formCakePackaging || undefined,
         formTubePackaging || undefined,
         formSingleCakePackaging,
       )
-      await applyMaterialDeductions(editingOrderId, matResult.deductions, dateStr)
-      showMaterialWarnings(matResult.missingCombos)
-    } else {
-      // ── Add mode ──
-      const { data: order } = await supabase
-        .from('orders')
-        .insert(orderData)
-        .select('id')
-        .single()
+      // RPC：reverse + apply 在 server 端為單一 transaction
+      await replaceOrderInventory(supabase, orderId, deductions, matResult.deductions, dateStr)
+      showInventoryWarnings(matResult.missingCombos, missingTubePkg)
 
-      if (order) {
-        if (itemEntries.length > 0) {
-          await supabase.from('order_items').insert(buildItemRows(order.id))
-        }
-        // Product inventory
-        const deductions = calculateDeductions(itemEntries, formTubePackaging || undefined)
-        await applyDeductions(order.id, deductions, dateStr)
-        // Packaging material inventory
-        const matResult = calculateMaterialDeductions(
-          itemEntries,
-          formCakePackaging || undefined,
-          formTubePackaging || undefined,
-          formSingleCakePackaging,
-        )
-        await applyMaterialDeductions(order.id, matResult.deductions, dateStr)
-        showMaterialWarnings(matResult.missingCombos)
-      }
+      resetForm()
+      setDialogOpen(false)
+      fetchOrders()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
     }
-
-    resetForm()
-    setDialogOpen(false)
-    setSaving(false)
-    fetchOrders()
   }
 
   const handleDelete = async (orderId: string) => {
     if (!confirm('確定要刪除這筆訂單嗎？')) return
-    await reverseDeductions(orderId)
-    await reverseMaterialDeductions(orderId)
-    await supabase.from('orders').delete().eq('id', orderId)
-    fetchOrders()
+    try {
+      await deleteOrderWithInventory(supabase, orderId)
+      fetchOrders()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err))
+    }
   }
 
   const handlePrintedToggle = async (orderId: string, printed: boolean) => {
@@ -429,97 +414,117 @@ export default function DayOrderPage() {
   // ─── Adjustment handlers ────────────────────────────
 
   const handleSaveAdjustment = async (value: AdjustmentInput) => {
-    // 編輯模式：先反轉舊扣減 + 刪舊 items
-    if (editingAdjustment) {
-      const oldRef = `adjust:${editingAdjustment.id}`
-      await reverseIngredientDeductionsHelper(supabase, oldRef)
-      await reverseMaterialDeductionsHelper(supabase, oldRef)
-      await supabase.from('stock_adjustment_items').delete().eq('adjustment_id', editingAdjustment.id)
-      await supabase
-        .from('stock_adjustments')
-        .update({
-          adjustment_type: value.adjustmentType,
-          note: value.note || null,
-        })
-        .eq('id', editingAdjustment.id)
-    }
-
-    // 取得 adjustmentId（新增或編輯）
-    let adjustmentId: string
-    if (editingAdjustment) {
-      adjustmentId = editingAdjustment.id
-    } else {
-      const { data, error } = await supabase
-        .from('stock_adjustments')
-        .insert({
-          date: dateStr,
-          adjustment_type: value.adjustmentType,
-          note: value.note || null,
-        })
-        .select()
-        .single()
-      if (error || !data) throw new Error(error?.message ?? 'insert adjustment failed')
-      adjustmentId = data.id
-    }
-
-    // Insert items
-    const itemRows = value.items.map((i) => ({
-      adjustment_id: adjustmentId,
-      product_id: i.productId,
-      quantity: parseFloat(i.quantity),
-      deduct_mode: i.deductMode,
-      packaging_style_id: i.packagingStyleId || null,
-    }))
-    const { error: itemErr } = await supabase.from('stock_adjustment_items').insert(itemRows)
-    if (itemErr) throw new Error(itemErr.message)
-
-    // 扣減 inventory
-    const referenceNote = `adjust:${adjustmentId}`
-
-    // 分類項目：成品 → 透過 recipe 展開；原料 → 直接聚合扣減
-    const finishedEntries: [string, number][] = []
-    const finishedPackaging: Record<string, string | null> = {}
-    const directDeductions: Record<string, number> = {}
-    for (const i of value.items) {
-      const qty = parseFloat(i.quantity)
-      if (i.deductMode === 'finished') {
-        finishedEntries.push([i.productId, qty])
-        finishedPackaging[i.productId] = i.packagingStyleId || null
+    try {
+      let adjustmentId: string
+      if (editingAdjustment) {
+        adjustmentId = editingAdjustment.id
+        const r1 = await supabase
+          .from('stock_adjustments')
+          .update({ adjustment_type: value.adjustmentType, note: value.note || null })
+          .eq('id', adjustmentId)
+        if (r1.error) throw new Error(`更新調整失敗：${r1.error.message}`)
+        const r2 = await supabase
+          .from('stock_adjustment_items')
+          .delete()
+          .eq('adjustment_id', adjustmentId)
+        if (r2.error) throw new Error(`清除舊扣減項失敗：${r2.error.message}`)
       } else {
-        directDeductions[i.productId] = (directDeductions[i.productId] || 0) + qty
+        const r = await supabase
+          .from('stock_adjustments')
+          .insert({
+            date: dateStr,
+            adjustment_type: value.adjustmentType,
+            note: value.note || null,
+          })
+          .select()
+          .single()
+        if (r.error || !r.data) throw new Error(`建立調整失敗：${r.error?.message ?? 'no data'}`)
+        adjustmentId = r.data.id
       }
+
+      // Insert items
+      const itemRows = value.items.map((i) => ({
+        adjustment_id: adjustmentId,
+        product_id: i.productId,
+        quantity: parseFloat(i.quantity),
+        deduct_mode: i.deductMode,
+        packaging_style_id: i.packagingStyleId || null,
+      }))
+      const r3 = await supabase.from('stock_adjustment_items').insert(itemRows)
+      if (r3.error) throw new Error(`寫入扣減項失敗：${r3.error.message}`)
+
+      // 分類：finished vs ingredient
+      const finishedEntries: [string, number][] = []
+      const finishedPackaging: Record<string, string | null> = {}
+      const directDeductions: Record<string, number> = {}
+      for (const i of value.items) {
+        const qty = parseFloat(i.quantity)
+        if (i.deductMode === 'finished') {
+          finishedEntries.push([i.productId, qty])
+          finishedPackaging[i.productId] = i.packagingStyleId || null
+        } else {
+          directDeductions[i.productId] = (directDeductions[i.productId] || 0) + qty
+        }
+      }
+
+      // 整合 ingredient = direct + finished 透過 recipe 展開 + tube_pkg 特例
+      const totalIngredient: Record<string, number> = { ...directDeductions }
+      let totalMaterial: Record<string, number> = {}
+      const adjMissingTubePkg: string[] = []
+      let adjMissingMaterial: { productName: string; packagingName: string | null }[] = []
+
+      if (finishedEntries.length > 0) {
+        const ingr = calculateIngredientDeductions(finishedEntries, recipes)
+        for (const [k, v] of Object.entries(ingr)) {
+          totalIngredient[k] = (totalIngredient[k] || 0) + v
+        }
+
+        // tube_pkg 特例：與訂單路徑對齊（散單/試吃選旋轉筒也要扣包裝庫存）
+        for (const [productId, qty] of finishedEntries) {
+          const product = products.find((p: any) => p.id === productId)
+          if (product?.category !== 'tube') continue
+          const pkgStyleId = finishedPackaging[productId]
+          if (!pkgStyleId) continue
+          const pkgName = packagingStyles.find((ps: any) => ps.id === pkgStyleId)?.name
+          if (!pkgName) continue
+          const tubePkgProduct = products.find((p: any) => p.category === 'tube_pkg' && p.name === pkgName)
+          if (tubePkgProduct) {
+            totalIngredient[tubePkgProduct.id] = (totalIngredient[tubePkgProduct.id] || 0) + qty
+          } else if (!adjMissingTubePkg.includes(pkgName)) {
+            adjMissingTubePkg.push(pkgName)
+          }
+        }
+
+        const matResult = calcMaterialDeductionsHelper(
+          finishedEntries,
+          products,
+          materialUsages,
+          (productId) => finishedPackaging[productId] ?? null,
+          (id) => packagingStyles.find((ps) => ps.id === id)?.name ?? null,
+        )
+        totalMaterial = matResult.deductions
+        adjMissingMaterial = matResult.missingCombos
+      }
+      showInventoryWarnings(adjMissingMaterial, adjMissingTubePkg)
+
+      // RPC：reverse + apply 為 atomic
+      await replaceAdjustmentInventory(supabase, adjustmentId, totalIngredient, totalMaterial, dateStr)
+
+      setEditingAdjustment(null)
+      fetchAdjustments()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err))
     }
-
-    // 原料直接扣減（batched）
-    if (Object.keys(directDeductions).length > 0) {
-      await applyIngredientDeductionsHelper(supabase, directDeductions, referenceNote, dateStr)
-    }
-
-    // 成品透過 recipe 展開扣減
-    if (finishedEntries.length > 0) {
-      const ingredientDeductions = calculateIngredientDeductions(finishedEntries, recipes)
-      await applyIngredientDeductionsHelper(supabase, ingredientDeductions, referenceNote, dateStr)
-
-      const { deductions: materialDeductions } = calcMaterialDeductionsHelper(
-        finishedEntries,
-        products,
-        materialUsages,
-        (productId) => finishedPackaging[productId] ?? null,
-        (id) => packagingStyles.find((ps) => ps.id === id)?.name ?? null,
-      )
-      await applyMaterialDeductionsHelper(supabase, materialDeductions, referenceNote, dateStr)
-    }
-
-    setEditingAdjustment(null)
-    fetchAdjustments()
   }
 
   const handleDeleteAdjustment = async (id: string) => {
     if (!confirm('確定刪除此筆試吃/耗損？相關庫存扣減會一併回沖。')) return
-    await reverseIngredientDeductionsHelper(supabase, `adjust:${id}`)
-    await reverseMaterialDeductionsHelper(supabase, `adjust:${id}`)
-    await supabase.from('stock_adjustments').delete().eq('id', id)
-    fetchAdjustments()
+    try {
+      await deleteAdjustmentWithInventory(supabase, id)
+      fetchAdjustments()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err))
+    }
   }
 
   const handleEditAdjustment = (a: StockAdjustment & { items: StockAdjustmentItem[] }) => {

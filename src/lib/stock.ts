@@ -161,3 +161,59 @@ export async function deductDirectIngredient(
     reference_note: referenceNote,
   })
 }
+
+// ─── Atomic RPC wrappers (migration 016) ────────────────────────
+// 把 reverse + apply 包在 Postgres function 內為單一 transaction，
+// 避免 client 中途斷線導致 inventory 永久遺失。
+
+export async function replaceOrderInventory(
+  supabase: SupabaseClient,
+  orderId: string,
+  ingredientDeductions: IngredientDeductions,
+  materialDeductions: MaterialDeductions,
+  date: string,
+): Promise<void> {
+  const { error } = await supabase.rpc('replace_order_inventory', {
+    p_order_id: orderId,
+    p_ingredient_deductions: ingredientDeductions,
+    p_material_deductions: materialDeductions,
+    p_date: date,
+  })
+  if (error) throw new Error(`寫入訂單庫存失敗：${error.message}`)
+}
+
+export async function deleteOrderWithInventory(
+  supabase: SupabaseClient,
+  orderId: string,
+): Promise<void> {
+  const { error } = await supabase.rpc('delete_order_with_inventory', {
+    p_order_id: orderId,
+  })
+  if (error) throw new Error(`刪除訂單失敗：${error.message}`)
+}
+
+export async function replaceAdjustmentInventory(
+  supabase: SupabaseClient,
+  adjustmentId: string,
+  ingredientDeductions: IngredientDeductions,
+  materialDeductions: MaterialDeductions,
+  date: string,
+): Promise<void> {
+  const { error } = await supabase.rpc('replace_adjustment_inventory', {
+    p_adjustment_id: adjustmentId,
+    p_ingredient_deductions: ingredientDeductions,
+    p_material_deductions: materialDeductions,
+    p_date: date,
+  })
+  if (error) throw new Error(`寫入調整庫存失敗：${error.message}`)
+}
+
+export async function deleteAdjustmentWithInventory(
+  supabase: SupabaseClient,
+  adjustmentId: string,
+): Promise<void> {
+  const { error } = await supabase.rpc('delete_adjustment_with_inventory', {
+    p_adjustment_id: adjustmentId,
+  })
+  if (error) throw new Error(`刪除調整失敗：${error.message}`)
+}

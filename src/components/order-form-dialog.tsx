@@ -15,10 +15,7 @@ import type { ProductRecipe, ProductMaterialUsage } from '@/lib/types'
 import {
   calculateIngredientDeductions,
   calculateMaterialDeductions as calcMaterialDeductionsHelper,
-  applyIngredientDeductions as applyIngredientDeductionsHelper,
-  applyMaterialDeductions as applyMaterialDeductionsHelper,
-  reverseIngredientDeductions as reverseIngredientDeductionsHelper,
-  reverseMaterialDeductions as reverseMaterialDeductionsHelper,
+  replaceOrderInventory,
 } from '@/lib/stock'
 
 export interface EditingOrder {
@@ -149,6 +146,7 @@ export function OrderFormDialog({
 
   const calculateDeductions = (itemEntries: [string, number][], tubePackagingId?: string) => {
     const deductions: Record<string, number> = calculateIngredientDeductions(itemEntries, recipes)
+    const missingTubePkg: string[] = []
 
     let totalTubes = 0
     for (const [productId, qty] of itemEntries) {
@@ -160,13 +158,16 @@ export function OrderFormDialog({
     if (tubePackagingId && totalTubes > 0) {
       const pkgStyleName = packagingStyles.find(ps => ps.id === tubePackagingId)?.name
       if (pkgStyleName) {
-        const tubePkgProducts = products.filter((p: any) => p.category === 'tube_pkg')
-        const tubePkg = tubePkgProducts.find((p: any) => p.name === pkgStyleName)
-        if (tubePkg) deductions[tubePkg.id] = (deductions[tubePkg.id] || 0) + totalTubes
+        const tubePkg = products.find((p: any) => p.category === 'tube_pkg' && p.name === pkgStyleName)
+        if (tubePkg) {
+          deductions[tubePkg.id] = (deductions[tubePkg.id] || 0) + totalTubes
+        } else {
+          missingTubePkg.push(pkgStyleName)
+        }
       }
     }
 
-    return deductions
+    return { deductions, missingTubePkg }
   }
 
   const calculateMaterialDeductions = (
@@ -189,22 +190,6 @@ export function OrderFormDialog({
       },
       (id) => packagingStyles.find((ps) => ps.id === id)?.name ?? null,
     )
-  }
-
-  const applyDeductions = async (orderId: string, deductions: Record<string, number>, orderDate: string) => {
-    await applyIngredientDeductionsHelper(supabase, deductions, `order:${orderId}`, orderDate)
-  }
-
-  const reverseDeductions = async (orderId: string) => {
-    await reverseIngredientDeductionsHelper(supabase, `order:${orderId}`)
-  }
-
-  const applyMaterialDeductions = async (orderId: string, deductions: Record<string, number>, orderDate: string) => {
-    await applyMaterialDeductionsHelper(supabase, deductions, `order:${orderId}`, orderDate)
-  }
-
-  const reverseMaterialDeductions = async (orderId: string) => {
-    await reverseMaterialDeductionsHelper(supabase, `order:${orderId}`)
   }
 
   const handleSave = async () => {
@@ -235,42 +220,61 @@ export function OrderFormDialog({
         }
       })
 
-    let orderId: string
-    if (editingOrder) {
-      await supabase.from('orders').update(orderData).eq('id', editingOrder.id)
-      await supabase.from('order_items').delete().eq('order_id', editingOrder.id)
-      if (itemEntries.length > 0) await supabase.from('order_items').insert(buildItemRows(editingOrder.id))
-      orderId = editingOrder.id
-      await reverseDeductions(orderId)
-      await reverseMaterialDeductions(orderId)
-    } else {
-      const { data: order } = await supabase.from('orders').insert(orderData).select('id').single()
-      if (!order) { setSaving(false); return }
-      orderId = order.id
-      if (itemEntries.length > 0) await supabase.from('order_items').insert(buildItemRows(orderId))
-    }
+    try {
+      let orderId: string
+      if (editingOrder) {
+        const r1 = await supabase.from('orders').update(orderData).eq('id', editingOrder.id)
+        if (r1.error) throw new Error(`更新訂單失敗：${r1.error.message}`)
+        const r2 = await supabase.from('order_items').delete().eq('order_id', editingOrder.id)
+        if (r2.error) throw new Error(`清除舊品項失敗：${r2.error.message}`)
+        if (itemEntries.length > 0) {
+          const r3 = await supabase.from('order_items').insert(buildItemRows(editingOrder.id))
+          if (r3.error) throw new Error(`寫入品項失敗：${r3.error.message}`)
+        }
+        orderId = editingOrder.id
+      } else {
+        const r = await supabase.from('orders').insert(orderData).select('id').single()
+        if (r.error || !r.data) throw new Error(`建立訂單失敗：${r.error?.message ?? 'no data returned'}`)
+        orderId = r.data.id
+        if (itemEntries.length > 0) {
+          const r2 = await supabase.from('order_items').insert(buildItemRows(orderId))
+          if (r2.error) throw new Error(`寫入品項失敗：${r2.error.message}`)
+        }
+      }
 
-    const invDeductions = calculateDeductions(itemEntries, formTubePackaging || undefined)
-    await applyDeductions(orderId, invDeductions, formDate)
-
-    const matResult = calculateMaterialDeductions(
-      itemEntries,
-      formCakePackaging || undefined,
-      formTubePackaging || undefined,
-      formSingleCakePackaging,
-    )
-    await applyMaterialDeductions(orderId, matResult.deductions, formDate)
-
-    if (matResult.missingCombos.length > 0 && onWarning) {
-      const lines = matResult.missingCombos.map(
-        c => `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`,
+      const { deductions: invDeductions, missingTubePkg } = calculateDeductions(itemEntries, formTubePackaging || undefined)
+      const matResult = calculateMaterialDeductions(
+        itemEntries,
+        formCakePackaging || undefined,
+        formTubePackaging || undefined,
+        formSingleCakePackaging,
       )
-      onWarning(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
-    }
 
-    setSaving(false)
-    onOpenChange(false)
-    onSaved?.()
+      // RPC：DELETE old + INSERT new 在 server 端為單一 transaction
+      await replaceOrderInventory(supabase, orderId, invDeductions, matResult.deductions, formDate)
+
+      if (onWarning) {
+        const sections: string[] = []
+        if (matResult.missingCombos.length > 0) {
+          const lines = matResult.missingCombos.map(
+            c => `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`,
+          )
+          sections.push(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
+        }
+        if (missingTubePkg.length > 0) {
+          const lines = missingTubePkg.map(n => `· ${n}`)
+          sections.push(`以下旋轉筒包裝款式找不到對應的 tube_pkg 產品（已停用或名稱不符），未扣減包裝庫存：\n${lines.join('\n')}`)
+        }
+        if (sections.length > 0) onWarning(sections.join('\n\n'))
+      }
+
+      onOpenChange(false)
+      onSaved?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
