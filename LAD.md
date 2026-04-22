@@ -471,19 +471,16 @@ ALTER TABLE stock_adjustments
 
 ## 未完成事項
 
-### 高優先
-
-1. **Migration 013/014 執行** — 在 Supabase Dashboard > SQL Editor 手動執行，否則散單無法儲存 / 未登入無法讀寫資料
-
-### 中優先
-
-1. **Realtime 啟用** — 需在 Supabase Dashboard 手動啟用相關表的 Realtime（`orders`, `order_items`, `inventory`, `stock_adjustments`, `stock_adjustment_items`）
-
 ### 低優先
 
 1. **自訂域名** — 可在 Vercel Dashboard > Domains 設定
 2. **匯出格式擴充** — 目前僅支援 CSV，可考慮加入 PDF 列印排版
 3. **散單 tube_pkg 扣減** — 目前散單選旋轉筒時僅扣 cake_bar 原料，未扣 tube_pkg 包裝庫存（繼承自試吃/耗損邏輯）
+
+### 已完成（2026-04-22 確認）
+
+- ✅ Migration 013/014 已於 Supabase Dashboard 執行
+- ✅ Realtime publication 已啟用 5 張表（`orders`, `order_items`, `inventory`, `stock_adjustments`, `stock_adjustment_items`）— 經端對端測試驗證
 
 ## 環境資訊
 
