@@ -5,9 +5,10 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths, isToday } from 'date-fns'
 import { zhTW } from 'date-fns/locale'
-import { ChevronLeft, ChevronRight, CalendarDays, Loader2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CalendarDays, Loader2, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { OrderFormDialog } from '@/components/order-form-dialog'
 
 interface DaySummary {
   orders: number
@@ -25,6 +26,7 @@ export default function CalendarPage() {
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [summaries, setSummaries] = useState<Record<string, DaySummary>>({})
   const [loading, setLoading] = useState(true)
+  const [quickAddDate, setQuickAddDate] = useState<string | null>(null)
 
   const days = useMemo(() => {
     const monthStart = startOfMonth(currentMonth)
@@ -119,10 +121,18 @@ export default function CalendarPage() {
             <div
               key={dateStr}
               onClick={() => router.push(`/calendar/${dateStr}`)}
-              className={`min-h-[60px] sm:min-h-[100px] cursor-pointer rounded-lg border p-1.5 sm:p-2 transition-colors hover:border-blue-300 hover:bg-blue-50/50 ${
+              className={`group relative min-h-[60px] sm:min-h-[100px] cursor-pointer rounded-lg border p-1.5 sm:p-2 transition-colors hover:border-blue-300 hover:bg-blue-50/50 ${
                 today ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white'
               }`}
             >
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setQuickAddDate(dateStr) }}
+                aria-label={`快速新增 ${dateStr} 訂單`}
+                className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 opacity-70 transition-colors hover:border-blue-500 hover:bg-blue-500 hover:text-white hover:opacity-100 group-hover:opacity-100"
+              >
+                <Plus className="h-3 w-3" />
+              </button>
               <div className={`text-sm font-medium ${today ? 'text-blue-700' : 'text-gray-700'}`}>
                 {format(day, 'd')}
               </div>
@@ -145,6 +155,13 @@ export default function CalendarPage() {
           )
         })}
       </div>
+
+      <OrderFormDialog
+        open={!!quickAddDate}
+        onOpenChange={(open) => { if (!open) setQuickAddDate(null) }}
+        initialDate={quickAddDate || ''}
+        onSaved={fetchData}
+      />
     </div>
   )
 }

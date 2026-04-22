@@ -26,7 +26,7 @@
 
 | 頁面 | 路由 | 狀態 | 說明 |
 |------|------|------|------|
-| 月曆視圖 | `/calendar` | ✅ 完成 | 月份切換、每日訂單摘要、Realtime、響應式 |
+| 月曆視圖 | `/calendar` | ✅ 完成 | 月份切換、每日訂單摘要、Realtime、響應式、**日期卡右上角 + 鈕快速新增訂單**（共用 `OrderFormDialog`） |
 | 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除、**資料驅動庫存扣減（product_recipe）**、CSV匯出、Realtime、**今日試吃/耗損/散單 CRUD** |
 | 客戶搜尋 | `/search` | ✅ 完成 | 即時搜尋(ilike)、點擊跳轉日期頁 |
 | 統計儀表板 | `/dashboard` | ✅ 完成 | 6 統計卡片 + 5 Recharts 圖表（含試吃統計） |
@@ -405,6 +405,14 @@ ALTER TABLE stock_adjustments
 ```
 
 ## 變更紀錄
+
+### 2026-04-22 — 月曆快速新增訂單
+
+- 月曆每日卡片右上角新增 + 按鈕，點擊即開啟訂單 Dialog（不需先進入日頁面）
+- 重用既有 `OrderFormDialog` 元件（`src/components/order-form-dialog.tsx`），無重複邏輯
+- 預設 70% 透明、hover 整張卡或按鈕本身時 100% 不透明 + 變藍
+- 按鈕內 `e.stopPropagation()`，不會觸發整張卡的「跳轉日頁面」行為
+- 儲存後自動 `fetchData()` 刷新月曆 summary
 
 ### 2026-04-20 — 散單類型 + 移除登入
 
