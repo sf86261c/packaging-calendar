@@ -27,6 +27,13 @@ export default function CalendarPage() {
   const [summaries, setSummaries] = useState<Record<string, DaySummary>>({})
   const [loading, setLoading] = useState(true)
   const [quickAddDate, setQuickAddDate] = useState<string | null>(null)
+  const [materialWarning, setMaterialWarning] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!materialWarning) return
+    const timer = setTimeout(() => setMaterialWarning(null), 8000)
+    return () => clearTimeout(timer)
+  }, [materialWarning])
 
   const days = useMemo(() => {
     const monthStart = startOfMonth(currentMonth)
@@ -103,6 +110,15 @@ export default function CalendarPage() {
         </div>
       </div>
 
+      {materialWarning && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <div className="flex items-start justify-between">
+            <pre className="whitespace-pre-wrap font-sans">{materialWarning}</pre>
+            <button onClick={() => setMaterialWarning(null)} className="ml-2 text-amber-600 hover:text-amber-800">✕</button>
+          </div>
+        </div>
+      )}
+
       <div className="mb-1 grid grid-cols-7 gap-1">
         {WEEKDAYS.map((d) => (
           <div key={d} className="py-2 text-center text-xs font-medium text-gray-500">{d}</div>
@@ -176,6 +192,7 @@ export default function CalendarPage() {
         onOpenChange={(open) => { if (!open) setQuickAddDate(null) }}
         initialDate={quickAddDate || ''}
         onSaved={fetchData}
+        onWarning={setMaterialWarning}
       />
     </div>
   )
