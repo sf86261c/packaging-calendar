@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths, isToday } from 'date-fns'
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths, isToday, differenceInCalendarDays } from 'date-fns'
 import { zhTW } from 'date-fns/locale'
 import { ChevronLeft, ChevronRight, CalendarDays, Loader2, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -117,12 +117,18 @@ export default function CalendarPage() {
           const dateStr = format(day, 'yyyy-MM-dd')
           const s = summaries[dateStr]
           const today = isToday(day)
+          const daysUntil = differenceInCalendarDays(day, new Date())
+          const urgent = daysUntil >= 0 && daysUntil <= 4 && (s?.pending || 0) > 0
           return (
             <div
               key={dateStr}
               onClick={() => router.push(`/calendar/${dateStr}`)}
               className={`group relative min-h-[60px] sm:min-h-[100px] cursor-pointer rounded-lg border p-1.5 sm:p-2 transition-colors hover:border-blue-300 hover:bg-blue-50/50 ${
-                today ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white'
+                urgent
+                  ? 'border-pink-400 bg-pink-100'
+                  : today
+                    ? 'border-blue-400 bg-blue-50'
+                    : 'border-gray-200 bg-white'
               }`}
             >
               <button
@@ -133,7 +139,9 @@ export default function CalendarPage() {
               >
                 <Plus className="h-5 w-5" strokeWidth={2.5} />
               </button>
-              <div className={`text-sm font-medium ${today ? 'text-blue-700' : 'text-gray-700'}`}>
+              <div className={`text-sm font-medium ${
+                urgent ? 'text-pink-700' : today ? 'text-blue-700' : 'text-gray-700'
+              }`}>
                 {format(day, 'd')}
               </div>
               {s && s.orders > 0 && (
@@ -145,7 +153,14 @@ export default function CalendarPage() {
                     {s.tubes > 0 && <Badge variant="secondary" className="text-[10px] px-1 py-0">🫙 {s.tubes}</Badge>}
                   </div>
                   {s.pending > 0 && (
-                    <Badge variant="outline" className="text-[10px] px-1 py-0 border-orange-300 text-orange-600">
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] px-1 py-0 ${
+                        urgent
+                          ? 'animate-pulse border-pink-500 bg-pink-200 text-pink-800 font-semibold'
+                          : 'border-orange-300 text-orange-600'
+                      }`}
+                    >
                       未列印 {s.pending}
                     </Badge>
                   )}

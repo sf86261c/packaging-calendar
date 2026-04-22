@@ -26,7 +26,7 @@
 
 | 頁面 | 路由 | 狀態 | 說明 |
 |------|------|------|------|
-| 月曆視圖 | `/calendar` | ✅ 完成 | 月份切換、每日訂單摘要、Realtime、響應式、**日期卡右上角 + 鈕快速新增訂單**（共用 `OrderFormDialog`） |
+| 月曆視圖 | `/calendar` | ✅ 完成 | 月份切換、每日訂單摘要、Realtime、響應式、**日期卡右上角 + 鈕快速新增訂單**（共用 `OrderFormDialog`）、**未來 4 天內含未列印訂單的卡片粉紅警示 + 呼吸燈 badge** |
 | 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除、**資料驅動庫存扣減（product_recipe）**、CSV匯出、Realtime、**今日試吃/耗損/散單 CRUD** |
 | 客戶搜尋 | `/search` | ✅ 完成 | 即時搜尋(ilike)、點擊跳轉日期頁 |
 | 統計儀表板 | `/dashboard` | ✅ 完成 | 6 統計卡片 + 5 Recharts 圖表（含試吃統計） |
@@ -406,13 +406,20 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
-### 2026-04-22 — 月曆快速新增訂單
+### 2026-04-22 — 月曆 UX 強化
 
+**快速新增訂單**
 - 月曆每日卡片右上角新增 + 按鈕，點擊即開啟訂單 Dialog（不需先進入日頁面）
 - 重用既有 `OrderFormDialog` 元件（`src/components/order-form-dialog.tsx`），無重複邏輯
 - 樣式：28px 黑底白十字圓鈕，hover 變灰
 - 按鈕內 `e.stopPropagation()`，不會觸發整張卡的「跳轉日頁面」行為
 - 儲存後自動 `fetchData()` 刷新月曆 summary
+
+**迫近未列印警示**
+- 條件：`differenceInCalendarDays(day, today) ∈ [0,4]` 且該日 `pending > 0`
+- 卡片背景改粉紅 (`bg-pink-100 border-pink-400`)，日期數字改 `text-pink-700`
+- 「未列印 N」badge 樣式升級為粉紅高亮 + Tailwind `animate-pulse` 呼吸燈
+- 大於 4 天的未列印 badge 維持原本橘色靜態樣式
 
 ### 2026-04-20 — 散單類型 + 移除登入
 
