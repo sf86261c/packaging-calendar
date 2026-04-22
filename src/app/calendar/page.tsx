@@ -129,9 +129,9 @@ export default function CalendarPage() {
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setQuickAddDate(dateStr) }}
                 aria-label={`快速新增 ${dateStr} 訂單`}
-                className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 opacity-70 transition-colors hover:border-blue-500 hover:bg-blue-500 hover:text-white hover:opacity-100 group-hover:opacity-100"
+                className="absolute right-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black text-white transition-colors hover:bg-gray-700"
               >
-                <Plus className="h-3 w-3" />
+                <Plus className="h-5 w-5" strokeWidth={2.5} />
               </button>
               <div className={`text-sm font-medium ${today ? 'text-blue-700' : 'text-gray-700'}`}>
                 {format(day, 'd')}

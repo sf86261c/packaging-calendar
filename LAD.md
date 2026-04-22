@@ -410,7 +410,7 @@ ALTER TABLE stock_adjustments
 
 - 月曆每日卡片右上角新增 + 按鈕，點擊即開啟訂單 Dialog（不需先進入日頁面）
 - 重用既有 `OrderFormDialog` 元件（`src/components/order-form-dialog.tsx`），無重複邏輯
-- 預設 70% 透明、hover 整張卡或按鈕本身時 100% 不透明 + 變藍
+- 樣式：28px 黑底白十字圓鈕，hover 變灰
 - 按鈕內 `e.stopPropagation()`，不會觸發整張卡的「跳轉日頁面」行為
 - 儲存後自動 `fetchData()` 刷新月曆 summary
 
