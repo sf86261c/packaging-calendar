@@ -1,11 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-const PRODUCT_SAFETY_STOCK: Record<string, number> = {
-  cake_bar: 2000,
-  tube_pkg: 100,
-}
-
 function addDaysISO(days: number): string {
   const d = new Date()
   d.setDate(d.getDate() + days)
@@ -30,9 +25,10 @@ export async function GET() {
     const d15 = addDaysISO(15)
 
     // ── Product inventory: D+15 for cake_bar + tube_pkg ──
+    // safety_stock 改為 per-product DB 欄位（migration 017）
     const { data: products } = await supabase
       .from('products')
-      .select('id, name, category')
+      .select('id, name, category, safety_stock')
       .eq('is_active', true)
       .in('category', ['cake_bar', 'tube_pkg'])
 
@@ -55,7 +51,7 @@ export async function GET() {
 
       for (const p of products) {
         const stock = stockMap[p.id] || 0
-        const safety = PRODUCT_SAFETY_STOCK[p.category] || 100
+        const safety = (p as { safety_stock?: number }).safety_stock ?? 100
         if (stock < safety) {
           lowProducts.push({ name: p.name, stock, safety })
         }

@@ -30,7 +30,7 @@
 | 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除、**資料驅動庫存扣減（product_recipe）**、CSV匯出、Realtime、**今日試吃/耗損/散單 CRUD** |
 | 客戶搜尋 | `/search` | ✅ 完成 | 即時搜尋(ilike)、點擊跳轉日期頁 |
 | 統計儀表板 | `/dashboard` | ✅ 完成 | 6 統計卡片 + 5 Recharts 圖表（含試吃統計） |
-| 產品庫存 | `/inventory` | ✅ 完成 | 蛋糕條/曲奇/旋轉筒包裝庫存、日期查詢、Realtime |
+| 產品庫存 | `/inventory` | ✅ 完成 | 蛋糕條/曲奇庫存、日期查詢、Realtime、**安全庫存可 inline 編輯（per-product，存於 products.safety_stock）** |
 | 包材庫存 | `/materials` | ✅ 完成 | 包材 CRUD、編輯/刪除、入庫、日期查詢（用量對照已移至 /settings 📋 編輯配方） |
 | 設定 | `/settings` | ✅ 完成 | 產品/包裝/烙印 CRUD、**新增產品可同步設定原料配方與包材消耗**、每項產品可📋編輯配方 |
 
@@ -223,6 +223,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `014_open_public_access.sql` | 移除登入後開放 anon 角色讀寫（所有資料表） |
 | `015_fix_tube_pkg_data.sql` | 啟用 3 個 tube_pkg 產品，將「馬戲團」改名為「樂園馬戲」對齊 packaging_styles |
 | `016_inventory_rpc.sql` | 新增 4 個 RPC functions（atomic transaction）：replace/delete order/adjustment inventory |
+| `017_product_safety_stock.sql` | products 加 safety_stock 欄位（per-product 可編輯安全庫存）+ backfill 對齊原 hard-coded 值 |
 
 ## 檔案結構
 
@@ -512,9 +513,10 @@ ALTER TABLE stock_adjustments
 
 ### 高優先 ⚠️
 
-1. **執行 Migration 015 + 016** — 在 Supabase Dashboard > SQL Editor：
+1. **執行 Migration 015 + 016 + 017** — 在 Supabase Dashboard > SQL Editor：
    - `015_fix_tube_pkg_data.sql`：未執行前所有旋轉筒訂單**未扣減 tube_pkg 包裝庫存**
    - `016_inventory_rpc.sql`：未執行前 RPC 不存在，前端 `replaceOrderInventory` 等呼叫會 alert 錯誤
+   - `017_product_safety_stock.sql`：未執行前 inventory 頁面 safety_stock 顯示為預設 100（編輯儲存會失敗）
 
 ### 低優先
 

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
 import { format, addDays } from 'date-fns'
-import { Loader2, Plus, CalendarDays, Send } from 'lucide-react'
+import { Loader2, Plus, CalendarDays, Send, Pencil, Check, X } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -21,12 +21,7 @@ interface ProductStock {
   name: string
   category: string
   stock: number
-}
-
-const SAFETY_STOCK: Record<string, number> = {
-  cake_bar: 2000,
-  cookie: 200,
-  tube_pkg: 100,
+  safety_stock: number
 }
 
 export default function InventoryPage() {
@@ -41,12 +36,14 @@ export default function InventoryPage() {
   const [asOfDate, setAsOfDate] = useState(format(addDays(new Date(), 15), 'yyyy-MM-dd'))
   const [sendingLine, setSendingLine] = useState(false)
   const [lineMessage, setLineMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
+  const [editingSafetyId, setEditingSafetyId] = useState<string | null>(null)
+  const [editingSafetyValue, setEditingSafetyValue] = useState('')
 
   const fetchInventory = useCallback(async () => {
     setLoading(true)
     const { data: prods } = await supabase
       .from('products')
-      .select('id, name, category, sort_order')
+      .select('id, name, category, sort_order, safety_stock')
       .eq('is_active', true)
       .order('sort_order')
 
@@ -69,6 +66,7 @@ export default function InventoryPage() {
         name: p.name,
         category: p.category,
         stock: stockMap[p.id] || 0,
+        safety_stock: (p as { safety_stock?: number }).safety_stock ?? 100,
       })))
     }
     setLoading(false)
@@ -112,6 +110,34 @@ export default function InventoryPage() {
     fetchInventory()
   }
 
+  const startEditSafety = (p: ProductStock) => {
+    setEditingSafetyId(p.id)
+    setEditingSafetyValue(String(p.safety_stock))
+  }
+
+  const cancelEditSafety = () => {
+    setEditingSafetyId(null)
+    setEditingSafetyValue('')
+  }
+
+  const saveEditSafety = async () => {
+    if (!editingSafetyId) return
+    const value = parseInt(editingSafetyValue, 10)
+    if (Number.isNaN(value) || value < 0) {
+      cancelEditSafety()
+      return
+    }
+    // 樂觀更新
+    setProducts(prev => prev.map(p => p.id === editingSafetyId ? { ...p, safety_stock: value } : p))
+    const editingId = editingSafetyId
+    cancelEditSafety()
+    const { error } = await supabase.from('products').update({ safety_stock: value }).eq('id', editingId)
+    if (error) {
+      alert(`儲存安全庫存失敗：${error.message}`)
+      fetchInventory()
+    }
+  }
+
   const handleLineNotify = async () => {
     setSendingLine(true)
     try {
@@ -139,11 +165,11 @@ export default function InventoryPage() {
 
   const cakes = products.filter(p => p.category === 'cake_bar')
   const cookies = products.filter(p => p.category === 'cookie')
-  const tubePkgs = products.filter(p => p.category === 'tube_pkg')
 
   const renderCard = (p: ProductStock) => {
-    const safety = SAFETY_STOCK[p.category] || 100
+    const safety = p.safety_stock
     const isLow = p.stock < safety
+    const isEditing = editingSafetyId === p.id
     return (
       <Card key={p.id}>
         <CardContent className="pt-4">
@@ -154,11 +180,46 @@ export default function InventoryPage() {
           <div className={`mt-2 text-3xl font-bold ${isLow ? 'text-red-600' : ''}`}>
             {p.stock.toLocaleString()}
           </div>
-          <div className="mt-1 text-xs text-gray-500">安全庫存: {safety.toLocaleString()}</div>
+          <div className="mt-1 flex items-center gap-1 text-xs text-gray-500">
+            <span>安全庫存:</span>
+            {isEditing ? (
+              <>
+                <Input
+                  type="number"
+                  min={0}
+                  value={editingSafetyValue}
+                  onChange={e => setEditingSafetyValue(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') saveEditSafety()
+                    if (e.key === 'Escape') cancelEditSafety()
+                  }}
+                  autoFocus
+                  className="h-6 w-20 px-1 text-xs"
+                />
+                <button onClick={saveEditSafety} className="text-green-600 hover:text-green-800" aria-label="儲存">
+                  <Check className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={cancelEditSafety} className="text-gray-400 hover:text-gray-600" aria-label="取消">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </>
+            ) : (
+              <>
+                <span>{safety.toLocaleString()}</span>
+                <button
+                  onClick={() => startEditSafety(p)}
+                  className="ml-1 text-gray-400 hover:text-blue-600"
+                  aria-label="編輯安全庫存"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              </>
+            )}
+          </div>
           <div className="mt-2 h-2 w-full rounded-full bg-gray-200">
             <div
               className={`h-2 rounded-full ${p.stock >= safety ? 'bg-green-500' : p.stock > 0 ? 'bg-orange-500' : 'bg-red-500'}`}
-              style={{ width: `${Math.min(100, (p.stock / safety) * 100)}%` }}
+              style={{ width: `${Math.min(100, (p.stock / Math.max(safety, 1)) * 100)}%` }}
             />
           </div>
         </CardContent>
@@ -263,13 +324,6 @@ export default function InventoryPage() {
         <div className="mb-6">
           <h2 className="mb-3 text-lg font-semibold">曲奇</h2>
           <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">{cookies.map(renderCard)}</div>
-        </div>
-      )}
-
-      {tubePkgs.length > 0 && (
-        <div className="mb-6">
-          <h2 className="mb-3 text-lg font-semibold">旋轉筒包裝</h2>
-          <div className="grid gap-3 sm:grid-cols-3">{tubePkgs.map(renderCard)}</div>
         </div>
       )}
     </div>
