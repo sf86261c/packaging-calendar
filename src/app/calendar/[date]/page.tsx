@@ -47,6 +47,7 @@ interface OrderRow {
   status: string
   batch_info: string | null
   batch_group_id: string | null
+  notes: string | null
   printed: boolean
   paid: boolean
   cake_packaging_id: string | null
@@ -109,7 +110,7 @@ export default function DayOrderPage() {
     const { data } = await supabase
       .from('orders')
       .select(`
-        id, customer_name, status, batch_info, batch_group_id, printed, paid, single_cake_branding_text,
+        id, customer_name, status, batch_info, batch_group_id, notes, printed, paid, single_cake_branding_text,
         cake_packaging_id, cake_branding_id, tube_packaging_id, single_cake_packaging_id,
         cake_packaging:packaging_styles!orders_cake_packaging_id_fkey(id, name),
         cake_branding:branding_styles!orders_cake_branding_id_fkey(id, name),
@@ -127,6 +128,7 @@ export default function DayOrderPage() {
         status: o.status,
         batch_info: o.batch_info,
         batch_group_id: o.batch_group_id ?? null,
+        notes: o.notes ?? null,
         printed: o.printed,
         paid: !!o.paid,
         cake_packaging_id: o.cake_packaging_id,
@@ -942,6 +944,14 @@ export default function DayOrderPage() {
                           <TableCell className="hidden sm:table-cell">
                             <span className="text-xs">{order.status}</span>
                             {order.batch_info && <div className="text-[10px] text-gray-500">{order.batch_info}</div>}
+                            {order.notes && (
+                              <div
+                                className="text-[10px] text-amber-600 italic mt-0.5"
+                                title={`備註：${order.notes}`}
+                              >
+                                📝 {order.notes}
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell className="font-medium">
                             {order.customer_name}
