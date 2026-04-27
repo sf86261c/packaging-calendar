@@ -30,8 +30,7 @@
 | 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除（**編輯時可改訂單日期**）、**付款狀態欄位（列表可一鍵切換 + 編輯 dialog 下拉）**、**分批/追加（複製訂單到多個日期、原訂單品項自動扣減、自動編號 batch_info）**、**資料驅動庫存扣減（product_recipe）**、CSV匯出、Realtime、**今日試吃/耗損/散單 CRUD** |
 | 客戶搜尋 | `/search` | ✅ 完成 | 即時搜尋(ilike)、點擊跳轉日期頁 |
 | 統計儀表板 | `/dashboard` | ✅ 完成 | 6 統計卡片 + 5 Recharts 圖表（含試吃統計） |
-| 產品庫存 | `/inventory` | ✅ 完成 | 蛋糕條/曲奇庫存、日期查詢、Realtime、**安全庫存可 inline 編輯（per-product，存於 products.safety_stock）** |
-| 包材庫存 | `/materials` | ✅ 完成 | 包材 CRUD、編輯/刪除、入庫、日期查詢（用量對照已移至 /settings 📋 編輯配方） |
+| 庫存總覽 | `/inventory` | ✅ 完成 | **整合產品庫存 + 包材庫存於同頁**：蜂蜜蛋糕（條）/ 旋轉筒包裝 / 曲奇 / 包材；**每項依 own `lead_time_days` 計算 D+N 預計庫存**；安全庫存與到貨時間 inline 可編輯；**曲奇可整批隱藏（隱藏時不列入叫貨通知）**；包材 CRUD/入庫/停用；產品入庫；LINE 叫貨通知；Realtime |
 | 設定 | `/settings` | ✅ 完成 | 產品/包裝/烙印 CRUD、**新增產品可同步設定原料配方與包材消耗**、每項產品可📋編輯配方 |
 
 ### 產品結構
@@ -124,30 +123,25 @@
 | 每日出貨趨勢 | LineChart（折線，3 線） | 蛋糕(粉紅)/旋轉筒(紫)/曲奇(琥珀) |
 | 每日訂單量 | AreaChart（面積） | orders 按日期分組 |
 
-### 產品庫存
+### 庫存總覽（整合 /inventory + /materials）
 
-- 蛋糕條（cake_bar）：經典原味/伯爵紅茶/茉莉花茶
-- 曲奇（cookie）：顯示順序 綜合白→綜合粉→綜合藍→原味白→可可粉→伯爵藍
-- 旋轉筒包裝（tube_pkg）：四季童話/銀河探險/馬戲團
-- **D+10 預計庫存**：預設顯示未來 10 天後的預計庫存餘額（依訂單日期篩選 inventory.date）
-- **日期選擇器**：可切換至任意日期查看庫存，預設 D+10；可點「D+10」按鈕快速回到預設
+`/materials` 路由已併入 `/inventory`，AppShell 移除「包材」項目。
+
+- **產品**：cake_bar（經典原味/伯爵紅茶/茉莉花茶）、tube_pkg（四季童話/銀河探險/樂園馬戲）、cookie（綜合白→綜合粉→綜合藍→原味白→可可粉→伯爵藍）
+- **每項依 own `lead_time_days`（D+N）計算未來庫存**：
+  - 公式：`stock = SUM(inventory WHERE product_id=X AND date <= today + lead_time_days)`
+  - 卡片右上角顯示 D+N badge，點擊 inline 編輯
+  - 蛋糕條/旋轉筒/曲奇預設 D+15、包材預設 D+7（per-item 可改）
+- **曲奇可整批隱藏**：曲奇 section 標題旁眼睛 icon「隱藏 / 顯示」按鈕，按下時 batch update 所有 cookie 的 `show_in_inventory`，**隱藏狀態下叫貨通知 API 不列入**
+- **安全庫存**：每張卡片 inline 編輯（pencil icon），存於 `products.safety_stock`
+- **包材**：CRUD（名稱、單位、安全庫存、到貨時間）+ 入庫 + 停用 + 已停用區
 - **LINE 叫貨通知**：
-  - 右上角「叫貨通知」按鈕（手動測試用），呼叫 `/api/line-notify` 統一端點
-  - **每日 9:00 AM 自動檢測**（Vercel Cron，UTC 1:00 = 台灣 9:00）
-  - 產品檢查：D+15 的 cake_bar（經典原味/伯爵紅茶/茉莉花茶）+ tube_pkg 庫存
-  - 包材檢查：每種包材依各自的 D+lead_time_days，若預計到貨日庫存低於安全庫存才通知
-  - 新增包材自動適用（查全部 active materials）
-- 安全庫存警示 + 進度條
-- Realtime 即時同步
-
-### 包材庫存
-
-- 包材品項 CRUD（名稱、單位、安全庫存、**到貨時間 D+?**）+ 編輯/刪除/停用
-- **到貨時間（lead_time_days）**：每種包材可設定叫貨後幾天到貨，用於叫貨通知判斷
-- 入庫紀錄管理
-- **日期選擇器**：歷史庫存查詢
-- 低庫存警示
-- 用量對照已移至 `/settings` 頁面（點產品旁 📋 編輯配方，原料配方 + 包材消耗同介面）
+  - 右上角「叫貨通知」按鈕（手動測試）+ **每日 9:00 AM 自動檢測**（Vercel Cron）
+  - 產品檢查：對 cake_bar / tube_pkg / cookie 過濾 `show_in_inventory = true`，每項用 own `lead_time_days` 比對庫存
+  - 包材檢查：每包材依 own `lead_time_days` 比對庫存
+  - 訊息格式：`• 名稱(D+N)：stock / 安全 N`
+- Realtime 即時同步（inventory + packaging_material_inventory）
+- 用量對照在 `/settings` 頁面（點產品旁 📋 編輯配方）
 
 ### 設定頁面 CRUD
 
@@ -232,6 +226,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `016_inventory_rpc.sql` | 新增 4 個 RPC functions（atomic transaction）：replace/delete order/adjustment inventory |
 | `017_product_safety_stock.sql` | products 加 safety_stock 欄位（per-product 可編輯安全庫存）+ backfill 對齊原 hard-coded 值 |
 | `018_order_paid.sql` | orders 加 paid BOOLEAN 欄位（付款狀態，預設 FALSE） |
+| `019_product_lead_time_visibility.sql` | products 加 lead_time_days INT DEFAULT 15 + show_in_inventory BOOLEAN DEFAULT TRUE |
 
 ## 檔案結構
 
@@ -246,8 +241,7 @@ packaging-calendar/
 │   │   │   └── [date]/page.tsx     # 日訂單管理 (CRUD+庫存+匯出+Realtime+試吃/耗損/散單)
 │   │   ├── search/page.tsx         # 客戶搜尋
 │   │   ├── dashboard/page.tsx      # 統計儀表板 (Recharts, 5卡片+4圖表)
-│   │   ├── inventory/page.tsx      # 產品庫存 (D+10+LINE叫貨+Realtime)
-│   │   ├── materials/page.tsx      # 包材庫存 (CRUD+入庫+日期查詢)
+│   │   ├── inventory/page.tsx      # 庫存總覽（產品+包材，per-item D+N，曲奇可隱藏）
 │   │   ├── settings/page.tsx       # 設定 (CRUD)
 │   │   └── api/
 │   │       └── line-notify/route.ts # LINE 叫貨通知 API
@@ -417,6 +411,32 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-04-27 — 庫存頁整合 + per-item lead_time + 曲奇可隱藏
+
+**需求**：合併庫存與包材頁；曲奇可隱藏（連帶不通知）；蛋糕 D+15 改為 per-item 可編輯。
+
+**設計**
+- Migration 019：products 加 `lead_time_days INT DEFAULT 15` + `show_in_inventory BOOLEAN DEFAULT TRUE`
+- 改寫 `/inventory` 為「庫存總覽」：包含蛋糕條 / 旋轉筒包裝 / 曲奇 / 包材四個 section
+- **每項依 own `lead_time_days`** 計算「today + N 天為止的累積庫存」
+- 卡片右上角 D+N badge 點擊 inline 編輯（pencil 編輯安全庫存維持原狀）
+- 曲奇 section 標題旁眼睛 icon「隱藏 / 顯示」，按下 batch update 所有 cookie 的 `show_in_inventory`
+- API `/api/line-notify`：products query 加 `.eq('show_in_inventory', true)`、加上 cookie 類別、每項用 own `lead_time_days` 計算（與包材邏輯一致）；訊息加 D+N
+- 移除 `/materials` 路由（檔案刪除）+ AppShell 移除「包材」項目
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| Migration 019 | `supabase/migrations/019_product_lead_time_visibility.sql` |
+| 庫存頁整合改寫 | `src/app/inventory/page.tsx` |
+| 移除包材路由 | `src/app/materials/page.tsx`（刪除） |
+| 側欄移除「包材」 | `src/components/app-shell.tsx` |
+| 叫貨 API per-item lead + show_in_inventory 過濾 | `src/app/api/line-notify/route.ts` |
+
+**Migration（待 Dashboard 執行）**
+- `019_product_lead_time_visibility.sql` — 未執行前所有產品的 `lead_time_days` / `show_in_inventory` 不存在，inline 編輯會 alert 錯誤、曲奇隱藏切換無效
+
 ### 2026-04-27 — 分批/追加複製訂單
 
 **需求**：編輯訂單時要能把品項拆分到別的日期；自動編號 batch_info。
@@ -563,8 +583,9 @@ ALTER TABLE stock_adjustments
 
 ### 高優先 ⚠️
 
-1. **執行 Migration 018** — 在 Supabase Dashboard > SQL Editor：
+1. **執行 Migration 018 + 019** — 在 Supabase Dashboard > SQL Editor：
    - `018_order_paid.sql`：未執行前 orders 沒有 paid 欄位，新增/編輯訂單會 alert 錯誤、列表的付款 pill 會全部顯示未付款
+   - `019_product_lead_time_visibility.sql`：未執行前 products 沒有 lead_time_days / show_in_inventory 欄位，庫存頁的 D+N 編輯與曲奇隱藏切換會 alert 錯誤
 
 ### 低優先
 

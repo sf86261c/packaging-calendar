@@ -22,38 +22,38 @@ export async function GET() {
     }
 
     const supabase = createClient(supabaseUrl, serviceKey)
-    const d15 = addDaysISO(15)
 
-    // ── Product inventory: D+15 for cake_bar + tube_pkg ──
+    // ── Product inventory: per-product lead_time_days ──
     // safety_stock 改為 per-product DB 欄位（migration 017）
+    // lead_time_days + show_in_inventory（migration 019）
     const { data: products } = await supabase
       .from('products')
-      .select('id, name, category, safety_stock')
+      .select('id, name, category, safety_stock, lead_time_days, show_in_inventory')
       .eq('is_active', true)
-      .in('category', ['cake_bar', 'tube_pkg'])
+      .eq('show_in_inventory', true)
+      .in('category', ['cake_bar', 'tube_pkg', 'cookie'])
 
-    const lowProducts: { name: string; stock: number; safety: number }[] = []
+    const lowProducts: { name: string; stock: number; safety: number; leadTime: number }[] = []
 
     if (products && products.length > 0) {
+      const maxLead = Math.max(...products.map(p => (p as { lead_time_days?: number }).lead_time_days ?? 15))
+      const maxDate = addDaysISO(maxLead)
       const productIds = products.map(p => p.id)
       const { data: invData } = await supabase
         .from('inventory')
-        .select('product_id, quantity')
-        .lte('date', d15)
+        .select('product_id, quantity, date')
+        .lte('date', maxDate)
         .in('product_id', productIds)
 
-      const stockMap: Record<string, number> = {}
-      if (invData) {
-        for (const inv of invData) {
-          stockMap[inv.product_id] = (stockMap[inv.product_id] || 0) + inv.quantity
-        }
-      }
-
       for (const p of products) {
-        const stock = stockMap[p.id] || 0
+        const lead = (p as { lead_time_days?: number }).lead_time_days ?? 15
+        const leadDate = addDaysISO(lead)
+        const stock = invData
+          ?.filter(r => r.product_id === p.id && r.date <= leadDate)
+          .reduce((sum: number, r: { quantity: number }) => sum + r.quantity, 0) ?? 0
         const safety = (p as { safety_stock?: number }).safety_stock ?? 100
         if (stock < safety) {
-          lowProducts.push({ name: p.name, stock, safety })
+          lowProducts.push({ name: p.name, stock, safety, leadTime: lead })
         }
       }
     }
@@ -99,9 +99,9 @@ export async function GET() {
     const lines: string[] = ['⚠️ 庫存不足通知', '']
 
     if (lowProducts.length > 0) {
-      lines.push('【產品庫存】D+15 預計不足：')
+      lines.push('【產品庫存】預計到貨日不足：')
       for (const p of lowProducts) {
-        lines.push(`• ${p.name}：${p.stock.toLocaleString()} / 安全 ${p.safety.toLocaleString()}`)
+        lines.push(`• ${p.name}(D+${p.leadTime})：${p.stock.toLocaleString()} / 安全 ${p.safety.toLocaleString()}`)
       }
       lines.push('')
     }

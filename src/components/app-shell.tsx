@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  Calendar, Search, BarChart3, Package, Boxes, Settings,
+  Calendar, Search, BarChart3, Package, Settings,
   Menu,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -15,7 +15,6 @@ const navItems = [
   { href: '/search', label: '搜尋', icon: Search },
   { href: '/dashboard', label: '統計', icon: BarChart3 },
   { href: '/inventory', label: '庫存', icon: Package },
-  { href: '/materials', label: '包材', icon: Boxes },
   { href: '/settings', label: '設定', icon: Settings },
 ]
 
