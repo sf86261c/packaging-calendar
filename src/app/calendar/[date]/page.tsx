@@ -32,6 +32,7 @@ import {
 } from '@/lib/stock'
 import { StockAdjustmentDialog } from '@/components/stock-adjustment-dialog'
 import type { AdjustmentInput } from '@/components/stock-adjustment-dialog'
+import { SplitOrderDialog, type SplitInput } from '@/components/split-order-dialog'
 
 interface OrderRow {
   id: string
@@ -91,6 +92,8 @@ export default function DayOrderPage() {
     id: string
     value: AdjustmentInput
   } | null>(null)
+
+  const [splitDialogOpen, setSplitDialogOpen] = useState(false)
 
   const fetchOrders = useCallback(async () => {
     setLoading(true)
@@ -423,6 +426,140 @@ export default function DayOrderPage() {
   const handlePaidToggle = async (orderId: string, paid: boolean) => {
     await supabase.from('orders').update({ paid }).eq('id', orderId)
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, paid } : o))
+  }
+
+  // ─── Split / Append 分批 ─────────────────────────────
+
+  const handleSplitConfirm = async (splits: SplitInput[]) => {
+    if (!editingOrderId) {
+      alert('請先儲存訂單後再分批')
+      return
+    }
+
+    const buildPackagingId = (productId: string) => {
+      const product = products.find((p) => p.id === productId)
+      return product?.category === 'single_cake'
+        ? (formSingleCakePackaging[productId] || null)
+        : null
+    }
+
+    const buildOrderHeader = (date: string) => ({
+      order_date: date,
+      customer_name: formName.trim() || '未命名',
+      status: formStatus || '待',
+      batch_info: null as string | null,
+      paid: formPaid,
+      cake_packaging_id: formCakePackaging || null,
+      cake_branding_id: formCakeBranding || null,
+      tube_packaging_id: formTubePackaging || null,
+      single_cake_packaging_id: null,
+      single_cake_branding_text: formSingleCakeBranding || null,
+    })
+
+    const buildItemRows = (orderId: string, items: Record<string, number>) =>
+      Object.entries(items)
+        .filter(([, q]) => q > 0)
+        .map(([productId, quantity]) => ({
+          order_id: orderId,
+          product_id: productId,
+          quantity,
+          packaging_id: buildPackagingId(productId),
+        }))
+
+    // 1. 計算 newPool = formItems - sum(splits.items)
+    const newPool: Record<string, number> = { ...formItems }
+    for (const s of splits) {
+      for (const [pid, qty] of Object.entries(s.items)) {
+        const left = (newPool[pid] || 0) - qty
+        if (left > 0) newPool[pid] = left
+        else delete newPool[pid]
+      }
+    }
+
+    try {
+      // 2. 建立各分批新訂單（複製當前 form 的所有非品項欄位）
+      const newOrderInfos: { id: string; date: string; itemEntries: [string, number][] }[] = []
+      for (const s of splits) {
+        const ins = await supabase.from('orders').insert(buildOrderHeader(s.date)).select('id').single()
+        if (ins.error || !ins.data) throw new Error(`建立分批訂單失敗：${ins.error?.message ?? 'no data'}`)
+        const newId = ins.data.id
+        const rows = buildItemRows(newId, s.items)
+        if (rows.length > 0) {
+          const ri = await supabase.from('order_items').insert(rows)
+          if (ri.error) throw new Error(`寫入分批品項失敗：${ri.error.message}`)
+        }
+        newOrderInfos.push({
+          id: newId,
+          date: s.date,
+          itemEntries: Object.entries(s.items).filter(([, q]) => q > 0),
+        })
+      }
+
+      // 3. 同步儲存原訂單（用當前 form 全欄位 + newPool 為品項）
+      const upd = await supabase.from('orders').update(buildOrderHeader(formDate)).eq('id', editingOrderId)
+      if (upd.error) throw new Error(`更新原訂單失敗：${upd.error.message}`)
+      const del = await supabase.from('order_items').delete().eq('order_id', editingOrderId)
+      if (del.error) throw new Error(`清除原品項失敗：${del.error.message}`)
+      const origRows = buildItemRows(editingOrderId, newPool)
+      if (origRows.length > 0) {
+        const ri = await supabase.from('order_items').insert(origRows)
+        if (ri.error) throw new Error(`寫入原品項失敗：${ri.error.message}`)
+      }
+
+      // 4. 依日期重排 batch_info = 分批1./2./...
+      const allOrders = [
+        { id: editingOrderId, date: formDate },
+        ...newOrderInfos.map((o) => ({ id: o.id, date: o.date })),
+      ].sort((a, b) => a.date.localeCompare(b.date))
+      for (let i = 0; i < allOrders.length; i++) {
+        const ub = await supabase
+          .from('orders')
+          .update({ batch_info: `分批${i + 1}.` })
+          .eq('id', allOrders[i].id)
+        if (ub.error) throw new Error(`更新分批編號失敗：${ub.error.message}`)
+      }
+
+      // 5. inventory 重算（原訂單 + 各分批訂單）
+      const origItemEntries = Object.entries(newPool).filter(([, q]) => q > 0) as [string, number][]
+      const { deductions: origIngr, missingTubePkg: missOrig } = calculateDeductions(
+        origItemEntries,
+        formTubePackaging || undefined,
+      )
+      const origMat = calculateMaterialDeductions(
+        origItemEntries,
+        formCakePackaging || undefined,
+        formTubePackaging || undefined,
+        formSingleCakePackaging,
+      )
+      await replaceOrderInventory(supabase, editingOrderId, origIngr, origMat.deductions, formDate)
+
+      const allMissingTubePkg = [...missOrig]
+      const allMissingCombos = [...origMat.missingCombos]
+      for (const info of newOrderInfos) {
+        const { deductions: ingr, missingTubePkg: missN } = calculateDeductions(
+          info.itemEntries,
+          formTubePackaging || undefined,
+        )
+        const mat = calculateMaterialDeductions(
+          info.itemEntries,
+          formCakePackaging || undefined,
+          formTubePackaging || undefined,
+          formSingleCakePackaging,
+        )
+        await replaceOrderInventory(supabase, info.id, ingr, mat.deductions, info.date)
+        allMissingTubePkg.push(...missN)
+        allMissingCombos.push(...mat.missingCombos)
+      }
+      showInventoryWarnings(allMissingCombos, [...new Set(allMissingTubePkg)])
+
+      // 6. 關閉 dialogs + reset + 刷新
+      setSplitDialogOpen(false)
+      setDialogOpen(false)
+      resetForm()
+      fetchOrders()
+    } catch (err) {
+      throw err instanceof Error ? err : new Error(String(err))
+    }
   }
 
   // ─── Adjustment handlers ────────────────────────────
@@ -905,8 +1042,26 @@ export default function DayOrderPage() {
               </div>
             </div>
             <div>
-              <Label>備註（分批/追加）</Label>
-              <Input value={formBatch} onChange={e => setFormBatch(e.target.value)} placeholder="e.g. 分批2." />
+              <Label>備註</Label>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSplitDialogOpen(true)}
+                  disabled={!editingOrderId}
+                  className="shrink-0"
+                  title={editingOrderId ? '將品項拆分到其他日期' : '請先儲存訂單後再分批'}
+                >
+                  分批/追加
+                </Button>
+                <Input
+                  value={formBatch}
+                  onChange={e => setFormBatch(e.target.value)}
+                  placeholder="e.g. 分批2."
+                  className="flex-1"
+                />
+              </div>
             </div>
 
             {/* === 蜂蜜蛋糕 === */}
@@ -1045,6 +1200,15 @@ export default function DayOrderPage() {
         packagingStyles={packagingStyles as import('@/lib/types').PackagingStyle[]}
         initialValue={editingAdjustment?.value}
         onSave={handleSaveAdjustment}
+      />
+
+      <SplitOrderDialog
+        open={splitDialogOpen}
+        onOpenChange={setSplitDialogOpen}
+        originalDate={formDate}
+        poolItems={formItems}
+        products={products as import('@/lib/types').Product[]}
+        onConfirm={handleSplitConfirm}
       />
     </div>
   )

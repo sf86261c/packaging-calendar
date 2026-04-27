@@ -27,7 +27,7 @@
 | 頁面 | 路由 | 狀態 | 說明 |
 |------|------|------|------|
 | 月曆視圖 | `/calendar` | ✅ 完成 | 月份切換、每日訂單摘要、Realtime、響應式、**日期卡右上角 + 鈕快速新增訂單**（共用 `OrderFormDialog`）、**未來 4 天內含未列印訂單的卡片粉紅警示 + 呼吸燈 badge** |
-| 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除（**編輯時可改訂單日期**）、**付款狀態欄位（列表可一鍵切換 + 編輯 dialog 下拉）**、**資料驅動庫存扣減（product_recipe）**、CSV匯出、Realtime、**今日試吃/耗損/散單 CRUD** |
+| 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除（**編輯時可改訂單日期**）、**付款狀態欄位（列表可一鍵切換 + 編輯 dialog 下拉）**、**分批/追加（複製訂單到多個日期、原訂單品項自動扣減、自動編號 batch_info）**、**資料驅動庫存扣減（product_recipe）**、CSV匯出、Realtime、**今日試吃/耗損/散單 CRUD** |
 | 客戶搜尋 | `/search` | ✅ 完成 | 即時搜尋(ilike)、點擊跳轉日期頁 |
 | 統計儀表板 | `/dashboard` | ✅ 完成 | 6 統計卡片 + 5 Recharts 圖表（含試吃統計） |
 | 產品庫存 | `/inventory` | ✅ 完成 | 蛋糕條/曲奇庫存、日期查詢、Realtime、**安全庫存可 inline 編輯（per-product，存於 products.safety_stock）** |
@@ -67,6 +67,12 @@
 
 - **新增/編輯/刪除**：完整 CRUD（筆圖示=編輯、垃圾桶=刪除）；**編輯訂單時可修改訂單日期**（改日期後該筆會從當前日頁面消失，inventory 記錄同步更新到新日期）
 - **付款狀態（paid）**：訂單列表「印」與「狀態」之間顯示已付款 / 未付款 pill（一鍵切換）；編輯 dialog 在客戶姓名與備註之間新增「付款」下拉；右側統計卡新增付款狀態小卡；CSV 匯出含付款欄位
+- **分批/追加**：編輯訂單 dialog 備註欄左側「分批/追加」按鈕（必須是已存在訂單才 enabled），開啟 `SplitOrderDialog` 後可新增多個分批日期，每個分批指定各品項數量。確認後流程：
+  1. 對每個分批日期建立新訂單（複製當前 form 的客戶/狀態/付款/包裝/烙印）
+  2. 原訂單品項數量自動扣減（formItems − Σ splits）
+  3. 所有相關訂單依日期由小到大重排，覆寫 batch_info = `分批1.` / `分批2.` / ...
+  4. inventory 對每筆訂單呼叫 RPC `replaceOrderInventory`（包含原料 + 包材 + tube_pkg）
+  5. 關閉所有 dialog、reset form、fetchOrders
 - **庫存自動扣減**：
   - cake → 扣 cake_bar（每口味 1 條/盒）
   - tube → 扣 cake_bar（1 條/筒）+ 扣 tube_pkg（選擇的包裝款式）
@@ -410,6 +416,31 @@ ALTER TABLE stock_adjustments
 ```
 
 ## 變更紀錄
+
+### 2026-04-27 — 分批/追加複製訂單
+
+**需求**：編輯訂單時要能把品項拆分到別的日期；自動編號 batch_info。
+
+**設計**
+- 新元件 `SplitOrderDialog`（`src/components/split-order-dialog.tsx`）
+  - 以「當前 form 的 formItems」作為可分配的池
+  - 可動態 +/- 多個分批 row，每 row 一個日期 + 各品項數量
+  - 即時顯示「原 / 已分 / 剩餘」與紅色超量警示
+  - 驗證：至少 1 筆有日期且有品項；單品項 Σ ≤ 池量
+- 編輯 dialog 備註欄改為 flex：[分批/追加 按鈕] + [備註 input]，按鈕在新增模式下 disabled（必須先儲存）
+- `handleSplitConfirm`：
+  1. 建立各分批新訂單（複製 form 全部非品項欄位）
+  2. update 原訂單（同步當前 form 改動 + newPool 為 quantity）
+  3. 所有相關訂單依 date 排序，依序 update batch_info = `分批{i+1}.`
+  4. 每筆呼叫 `replaceOrderInventory` 重算原料/包材/tube_pkg
+  5. 關閉 dialogs、resetForm、fetchOrders
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| 新元件 SplitOrderDialog | `src/components/split-order-dialog.tsx` |
+| 備註欄加按鈕 + state + handleSplitConfirm + 掛載 dialog | `src/app/calendar/[date]/page.tsx` |
 
 ### 2026-04-27 — 訂單編輯日期可改 + 付款狀態欄位
 
