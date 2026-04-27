@@ -411,6 +411,43 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-04-27 — UI 動畫：日期卡 + 鈕 hover 水波 + 全 Dialog macOS Genie 動畫
+
+**需求**：日期卡 + 鈕平時隱藏，滑鼠懸停才以水波方式顯現；所有產生額外視窗的 dialog（新增、編輯、分批、試吃/耗損/散單…）點開時要像 macOS Dock 反向 Genie 一樣從觸發點精靈式釋放出來，關閉時收回。
+
+**設計**
+
+1. **日期卡 + 鈕水波 hover**
+   - 預設 `opacity-0 scale-50`，`group-hover:opacity-100 group-hover:scale-100`（300ms ease-out）
+   - 疊兩層 `animate-ping`：內層黑色 disc（opacity 40%）+ 外層 ring（`[animation-delay:300ms]` 錯開時序）
+   - `focus-visible:` 維持鍵盤可達性
+
+2. **Dialog Genie 動畫（全域）**
+   - 在 `globals.css` 定義 `@keyframes dialog-genie-in / dialog-genie-out`，0%/100% 在 origin 點以 `scale(0.05)` emerge，30% 中段 `scale(0.2, 0.55)` 製造漏斗（scaleY 為 scaleX 的 2.75x），65% 接近原尺寸，100% 居中 `scale(1)`
+   - `@property --genie-tx / --genie-ty` 註冊為 `<length>` + `inherits: true`，讓 CSS 變數可在 keyframes 之間插值，並透過 inheritance 傳到 portal 中的 popup
+   - 直接寫 raw CSS rule `[data-slot="dialog-content"][data-open]` / `[data-closed]`，避開 Tailwind arbitrary value parser
+   - `dialog.tsx` module-level 全域 listener 監聽 `pointerdown` + `keydown(Enter/Space)`，把觸發點相對 viewport 中心的偏移寫到 `document.documentElement.style.setProperty('--genie-tx/ty', …)`
+   - cubic-bezier in: `(0.16, 1, 0.3, 1)` ease-out-expo / out: `(0.7, 0, 0.84, 0)` ease-in
+   - 支援 `prefers-reduced-motion: reduce`
+
+**踩到兩個非預期 bug（已修，留紀錄避免再踩）**
+
+1. **Tailwind 4 把 `-translate-x-1/2 -translate-y-1/2` 編譯成 CSS 個別屬性 `translate: -50% -50%`，不是 `transform`**。CSS 規範下 `translate` 屬性先 apply、再 apply `transform`，所以 keyframes 寫 `transform: translate(-50%, -50%) ...` 會跟 className 的 translate **疊兩次**，dialog 跑到 viewport -100%/-100% 位置（即左上角、上半截跑出 viewport）。
+   - **修法**：keyframes 不寫 `translate(-50%, -50%)`，居中交由 className 的 `translate` 屬性處理，keyframes 只負責 genie offset + scale。
+
+2. **base-ui Popup 會接管 popup 的 inline style**（自動寫入 `--nested-dialogs: 0;` 等），用 `useLayoutEffect` + `popupRef.current.style.setProperty('--genie-tx', ...)` 設的 CSS variable 會被它覆寫。
+   - **修法**：把 `--genie-tx/-ty` 設在 `<html>` 上，`@property inherits: true` 讓 popup 透過 CSS inheritance 自動取用，繞過 base-ui 對 popup inline style 的接管。
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| 加 `dialog-genie-in/out` keyframes + raw CSS rule + `@property --genie-tx/ty` | `src/app/globals.css` |
+| 全域 pointerdown/keydown listener 設 `<html>` 的 `--genie-tx/ty`、清掉 popup ref 與 inline style 寫入 | `src/components/ui/dialog.tsx` |
+| 月曆日期卡 + 鈕改為 `opacity-0 scale-50` 預設隱藏 + group-hover 顯現 + `animate-ping` 雙層水波 | `src/app/calendar/page.tsx` |
+
+---
+
 ### 2026-04-27 — 庫存頁整合 + per-item lead_time + 曲奇可隱藏
 
 **需求**：合併庫存與包材頁；曲奇可隱藏（連帶不通知）；蛋糕 D+15 改為 per-item 可編輯。
