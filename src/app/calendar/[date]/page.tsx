@@ -32,13 +32,13 @@ import {
 } from '@/lib/stock'
 import { StockAdjustmentDialog } from '@/components/stock-adjustment-dialog'
 import type { AdjustmentInput } from '@/components/stock-adjustment-dialog'
-import { SplitOrderDialog, type SplitInput } from '@/components/split-order-dialog'
+import { SplitOrderDialog, type SplitInput, type AppendInput } from '@/components/split-order-dialog'
 
 interface BatchSibling {
   orderId: string
   date: string
   batch_info: string | null
-  items: { name: string; quantity: number }[]
+  items: { productId: string; name: string; quantity: number }[]
 }
 
 interface OrderRow {
@@ -197,7 +197,7 @@ export default function DayOrderPage() {
         .from('orders')
         .select(`
           id, order_date, batch_group_id, batch_info,
-          order_items(quantity, product:products(name))
+          order_items(quantity, product_id, product:products(name))
         `)
         .in('batch_group_id', groupIds)
 
@@ -215,6 +215,7 @@ export default function DayOrderPage() {
             items: ((s.order_items || []) as any[])
               .filter((i) => i.quantity > 0)
               .map((i) => ({
+                productId: (i.product_id as string) || '',
                 name: (i.product?.name as string) || '',
                 quantity: i.quantity as number,
               })),
@@ -491,13 +492,15 @@ export default function DayOrderPage() {
 
   // ─── Split / Append 分批 ─────────────────────────────
 
-  const handleSplitConfirm = async (splits: SplitInput[]) => {
+  const handleSplitConfirm = async (
+    { splits, appends }: { splits: SplitInput[]; appends: AppendInput[] },
+  ) => {
     if (!editingOrderId) {
-      alert('請先儲存訂單後再分批')
+      alert('請先儲存訂單後再分批/追加')
       return
     }
 
-    // batch_group_id：原訂單若已有(多次分批),沿用以保持同群;否則產生新 UUID
+    // batch_group_id：原訂單若已有(多次分批/追加),沿用以保持同群;否則產生新 UUID
     const editingOrder = orders.find((o) => o.id === editingOrderId)
     const batchGroupId = editingOrder?.batch_group_id ?? crypto.randomUUID()
 
@@ -543,21 +546,28 @@ export default function DayOrderPage() {
     }
 
     try {
-      // 2. 建立各分批新訂單（複製當前 form 的所有非品項欄位）
+      // 2. 建立分批 + 追加新訂單(都複製當前 form 的非品項欄位、都綁同 batch_group_id)
+      //    分批會從原訂單品項池扣減,追加不會
       const newOrderInfos: { id: string; date: string; itemEntries: [string, number][] }[] = []
-      for (const s of splits) {
-        const ins = await supabase.from('orders').insert(buildOrderHeader(s.date)).select('id').single()
-        if (ins.error || !ins.data) throw new Error(`建立分批訂單失敗：${ins.error?.message ?? 'no data'}`)
+      const inserts: { date: string; items: Record<string, number>; kind: 'split' | 'append' }[] = [
+        ...splits.map((s) => ({ date: s.date, items: s.items, kind: 'split' as const })),
+        ...appends.map((a) => ({ date: a.date, items: a.items, kind: 'append' as const })),
+      ]
+      for (const req of inserts) {
+        const ins = await supabase.from('orders').insert(buildOrderHeader(req.date)).select('id').single()
+        if (ins.error || !ins.data) {
+          throw new Error(`建立${req.kind === 'split' ? '分批' : '追加'}訂單失敗：${ins.error?.message ?? 'no data'}`)
+        }
         const newId = ins.data.id
-        const rows = buildItemRows(newId, s.items)
+        const rows = buildItemRows(newId, req.items)
         if (rows.length > 0) {
           const ri = await supabase.from('order_items').insert(rows)
-          if (ri.error) throw new Error(`寫入分批品項失敗：${ri.error.message}`)
+          if (ri.error) throw new Error(`寫入${req.kind === 'split' ? '分批' : '追加'}品項失敗：${ri.error.message}`)
         }
         newOrderInfos.push({
           id: newId,
-          date: s.date,
-          itemEntries: Object.entries(s.items).filter(([, q]) => q > 0),
+          date: req.date,
+          itemEntries: Object.entries(req.items).filter(([, q]) => q > 0),
         })
       }
 
@@ -1331,6 +1341,18 @@ export default function DayOrderPage() {
         onOpenChange={setSplitDialogOpen}
         originalDate={formDate}
         poolItems={formItems}
+        appendableProductIds={(() => {
+          // 該客戶可追加的品項 = 當前訂單品項 ∪ 同 batch_group 兄弟訂單品項
+          const ids = new Set<string>(Object.keys(formItems).filter((pid) => (formItems[pid] || 0) > 0))
+          if (editingOrderId) {
+            for (const sib of batchSiblings[editingOrderId] || []) {
+              for (const it of sib.items) {
+                if (it.productId) ids.add(it.productId)
+              }
+            }
+          }
+          return [...ids]
+        })()}
         products={products as import('@/lib/types').Product[]}
         onConfirm={handleSplitConfirm}
       />
