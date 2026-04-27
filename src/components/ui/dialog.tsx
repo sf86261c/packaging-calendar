@@ -7,6 +7,41 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
+/**
+ * 全域追蹤最後一次互動座標（相對 viewport 中心），
+ * dialog mount 時讀取這個座標作為 macOS Genie 動畫的起點。
+ * 鍵盤 Enter/Space 觸發時也會記錄當下 focused element 的位置。
+ */
+let lastInteractionX = 0
+let lastInteractionY = 0
+let lastInteractionAt = 0
+
+declare global {
+  interface Window {
+    __dialogGenieListenersInstalled?: boolean
+  }
+}
+
+if (typeof window !== "undefined" && !window.__dialogGenieListenersInstalled) {
+  window.__dialogGenieListenersInstalled = true
+  const recordPointer = (e: PointerEvent) => {
+    lastInteractionX = e.clientX - window.innerWidth / 2
+    lastInteractionY = e.clientY - window.innerHeight / 2
+    lastInteractionAt = performance.now()
+  }
+  const recordKey = (e: KeyboardEvent) => {
+    if (e.key !== "Enter" && e.key !== " ") return
+    const target = e.target as HTMLElement | null
+    if (!target?.getBoundingClientRect) return
+    const rect = target.getBoundingClientRect()
+    lastInteractionX = rect.left + rect.width / 2 - window.innerWidth / 2
+    lastInteractionY = rect.top + rect.height / 2 - window.innerHeight / 2
+    lastInteractionAt = performance.now()
+  }
+  document.addEventListener("pointerdown", recordPointer, true)
+  document.addEventListener("keydown", recordKey, true)
+}
+
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
 }
@@ -43,17 +78,37 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  style,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
 }) {
+  const popupRef = React.useRef<HTMLDivElement>(null)
+  const useIsoLayoutEffect =
+    typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect
+
+  useIsoLayoutEffect(() => {
+    const el = popupRef.current
+    if (!el) return
+    const recent = performance.now() - lastInteractionAt < 800
+    if (recent) {
+      el.style.setProperty("--genie-tx", `${lastInteractionX}px`)
+      el.style.setProperty("--genie-ty", `${lastInteractionY}px`)
+    } else {
+      el.style.setProperty("--genie-tx", "0px")
+      el.style.setProperty("--genie-ty", "0px")
+    }
+  }, [])
+
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Popup
+        ref={popupRef}
         data-slot="dialog-content"
+        style={style}
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 outline-none sm:max-w-sm will-change-transform data-open:[animation:dialog-genie-in_440ms_cubic-bezier(0.34,1.2,0.64,1)_forwards] data-closed:[animation:dialog-genie-out_280ms_cubic-bezier(0.55,0,0.7,0.3)_forwards]",
           className
         )}
         {...props}
