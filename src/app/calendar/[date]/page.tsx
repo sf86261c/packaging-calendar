@@ -46,6 +46,7 @@ interface OrderRow {
   customer_name: string
   status: string
   batch_info: string | null
+  batch_group_id: string | null
   printed: boolean
   paid: boolean
   cake_packaging_id: string | null
@@ -108,7 +109,7 @@ export default function DayOrderPage() {
     const { data } = await supabase
       .from('orders')
       .select(`
-        id, customer_name, status, batch_info, printed, paid, single_cake_branding_text,
+        id, customer_name, status, batch_info, batch_group_id, printed, paid, single_cake_branding_text,
         cake_packaging_id, cake_branding_id, tube_packaging_id, single_cake_packaging_id,
         cake_packaging:packaging_styles!orders_cake_packaging_id_fkey(id, name),
         cake_branding:branding_styles!orders_cake_branding_id_fkey(id, name),
@@ -125,6 +126,7 @@ export default function DayOrderPage() {
         customer_name: o.customer_name,
         status: o.status,
         batch_info: o.batch_info,
+        batch_group_id: o.batch_group_id ?? null,
         printed: o.printed,
         paid: !!o.paid,
         cake_packaging_id: o.cake_packaging_id,
@@ -175,14 +177,15 @@ export default function DayOrderPage() {
     }
   }, [dateStr])
 
-  // 撈所有「同客戶 + 有 batch_info」的訂單作為各筆訂單的兄弟批次。
-  // 限制：以 customer_name + 非 null batch_info 為匹配規則（無 batch_group_id）。
-  // 同客戶不同次分批會混在一起,使用者可從 batch_info 字串(分批1./2./...)分辨。
+  // 撈所有同 batch_group_id 的訂單作為兄弟批次。
+  // 用 UUID 群組綁定取代「customer_name + batch_info」字串匹配,
+  // 避免同名同姓客戶誤合併,也讓手動輸入備註不會誤觸發。
+  // 只有透過「分批/追加」按鈕的訂單會被綁同一個 group。
   useEffect(() => {
-    const batchedCustomers = Array.from(
-      new Set(orders.filter((o) => o.batch_info).map((o) => o.customer_name)),
+    const groupIds = Array.from(
+      new Set(orders.map((o) => o.batch_group_id).filter((g): g is string => !!g)),
     )
-    if (batchedCustomers.length === 0) {
+    if (groupIds.length === 0) {
       setBatchSiblings({})
       return
     }
@@ -191,19 +194,18 @@ export default function DayOrderPage() {
       const { data } = await supabase
         .from('orders')
         .select(`
-          id, order_date, customer_name, batch_info,
+          id, order_date, batch_group_id, batch_info,
           order_items(quantity, product:products(name))
         `)
-        .in('customer_name', batchedCustomers)
-        .not('batch_info', 'is', null)
+        .in('batch_group_id', groupIds)
 
       if (cancelled || !data) return
 
       const result: Record<string, BatchSibling[]> = {}
       for (const o of orders) {
-        if (!o.batch_info) continue
+        if (!o.batch_group_id) continue
         result[o.id] = (data as any[])
-          .filter((s) => s.customer_name === o.customer_name && s.id !== o.id)
+          .filter((s) => s.batch_group_id === o.batch_group_id && s.id !== o.id)
           .map((s) => ({
             orderId: s.id as string,
             date: s.order_date as string,
@@ -493,6 +495,10 @@ export default function DayOrderPage() {
       return
     }
 
+    // batch_group_id：原訂單若已有(多次分批),沿用以保持同群;否則產生新 UUID
+    const editingOrder = orders.find((o) => o.id === editingOrderId)
+    const batchGroupId = editingOrder?.batch_group_id ?? crypto.randomUUID()
+
     const buildPackagingId = (productId: string) => {
       const product = products.find((p) => p.id === productId)
       return product?.category === 'single_cake'
@@ -505,6 +511,7 @@ export default function DayOrderPage() {
       customer_name: formName.trim() || '未命名',
       status: formStatus || '待',
       batch_info: null as string | null,
+      batch_group_id: batchGroupId,
       paid: formPaid,
       cake_packaging_id: formCakePackaging || null,
       cake_branding_id: formCakeBranding || null,
@@ -563,16 +570,22 @@ export default function DayOrderPage() {
         if (ri.error) throw new Error(`寫入原品項失敗：${ri.error.message}`)
       }
 
-      // 4. 依日期重排 batch_info = 分批1./2./...
-      const allOrders = [
-        { id: editingOrderId, date: formDate },
-        ...newOrderInfos.map((o) => ({ id: o.id, date: o.date })),
-      ].sort((a, b) => a.date.localeCompare(b.date))
-      for (let i = 0; i < allOrders.length; i++) {
+      // 4. 抓出整個 batch_group 的訂單（含先前的 split 產生的兄弟訂單），
+      //    依日期重排 batch_info = 分批1./2./...,確保多次分批編號一致
+      const allInGroup = await supabase
+        .from('orders')
+        .select('id, order_date')
+        .eq('batch_group_id', batchGroupId)
+        .order('order_date', { ascending: true })
+      if (allInGroup.error) throw new Error(`查詢同群訂單失敗：${allInGroup.error.message}`)
+      const sorted = (allInGroup.data || []).slice().sort((a: any, b: any) =>
+        (a.order_date as string).localeCompare(b.order_date as string),
+      )
+      for (let i = 0; i < sorted.length; i++) {
         const ub = await supabase
           .from('orders')
           .update({ batch_info: `分批${i + 1}.` })
-          .eq('id', allOrders[i].id)
+          .eq('id', (sorted[i] as any).id)
         if (ub.error) throw new Error(`更新分批編號失敗：${ub.error.message}`)
       }
 
