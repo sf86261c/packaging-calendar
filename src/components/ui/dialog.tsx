@@ -7,52 +7,6 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
-/**
- * 全域追蹤最後一次互動座標（相對 viewport 中心），
- * dialog mount 時讀取這個座標作為 macOS Genie 動畫的起點。
- * 鍵盤 Enter/Space 觸發時也會記錄當下 focused element 的位置。
- */
-let lastInteractionX = 0
-let lastInteractionY = 0
-let lastInteractionAt = 0
-
-declare global {
-  interface Window {
-    __dialogGenieListenersInstalled?: boolean
-  }
-}
-
-if (typeof window !== "undefined" && !window.__dialogGenieListenersInstalled) {
-  window.__dialogGenieListenersInstalled = true
-  const setRootGenie = (x: number, y: number) => {
-    lastInteractionX = x
-    lastInteractionY = y
-    lastInteractionAt = performance.now()
-    // 設在 <html> 上，靠 CSS inheritance 傳到 portal 中的 dialog popup，
-    // 避免被 base-ui 覆寫 popup 的 inline style。
-    document.documentElement.style.setProperty("--genie-tx", `${x}px`)
-    document.documentElement.style.setProperty("--genie-ty", `${y}px`)
-  }
-  const recordPointer = (e: PointerEvent) => {
-    setRootGenie(
-      e.clientX - window.innerWidth / 2,
-      e.clientY - window.innerHeight / 2,
-    )
-  }
-  const recordKey = (e: KeyboardEvent) => {
-    if (e.key !== "Enter" && e.key !== " ") return
-    const target = e.target as HTMLElement | null
-    if (!target?.getBoundingClientRect) return
-    const rect = target.getBoundingClientRect()
-    setRootGenie(
-      rect.left + rect.width / 2 - window.innerWidth / 2,
-      rect.top + rect.height / 2 - window.innerHeight / 2,
-    )
-  }
-  document.addEventListener("pointerdown", recordPointer, true)
-  document.addEventListener("keydown", recordKey, true)
-}
-
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
 }
@@ -94,8 +48,6 @@ function DialogContent({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
 }) {
-  // origin 由全域 listener 寫到 <html> 的 CSS variable，popup 透過 inheritance 取用
-
   return (
     <DialogPortal>
       <DialogOverlay />

@@ -129,70 +129,34 @@
   }
 }
 
-/* macOS Genie-style dialog animation
- * --genie-tx / --genie-ty 為觸發按鈕中心相對 viewport 中心的偏移（由 dialog.tsx 設定）
- * 沒設定時為 0,0（從中央 zoom 出現）
+/* 彈性放大 dialog 進場動畫（參考 ithelp 文章 #10275104）
+ * 進場 0.5s：scale 從 0 → 1.1 → 0.95 → 1.05 → 1，營造 Q 彈感
+ * 離場 0.18s：scale 1 → 0，乾淨快速消失
  *
- * 用 @property 註冊讓 var() 在 keyframe 之間平滑插值
+ * Tailwind 4 用 CSS `translate` 屬性處理置中（-translate-x-1/2 -translate-y-1/2），
+ * `translate` 與 `transform` 會獨立組合（translate 先、transform 後），
+ * 所以 keyframes 只動 transform: scale，居中保留給 className 的 translate。
  */
-@property --genie-tx {
-  syntax: "<length>";
-  inherits: true;
-  initial-value: 0px;
-}
-@property --genie-ty {
-  syntax: "<length>";
-  inherits: true;
-  initial-value: 0px;
+@keyframes dialog-popup-in {
+  0%   { transform: scale(0);    opacity: 0; }
+  20%  { transform: scale(1.1);  opacity: 1; }
+  50%  { transform: scale(0.95); opacity: 1; }
+  80%  { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(1);    opacity: 1; }
 }
 
-/* 注意：Tailwind 4 的 -translate-x-1/2 -translate-y-1/2 用 CSS 獨立屬性 `translate`，
- * 會與此處的 `transform` 屬性「組合」(translate 屬性先 apply, 再 apply transform)。
- * 因此 keyframes 不能再寫 translate(-50%, -50%)，否則會疊兩次造成跑出 viewport。
- * keyframes 只負責 genie offset + scale，居中由 className 的 translate 屬性處理。
- */
-@keyframes dialog-genie-in {
-  0% {
-    opacity: 0;
-    transform: translate(var(--genie-tx), var(--genie-ty)) scale(0.05, 0.05);
-  }
-  30% {
-    opacity: 0.85;
-    transform: translate(calc(var(--genie-tx) * 0.45), calc(var(--genie-ty) * 0.45)) scale(0.2, 0.55);
-  }
-  65% {
-    opacity: 1;
-    transform: translate(calc(var(--genie-tx) * 0.1), calc(var(--genie-ty) * 0.1)) scale(0.75, 0.92);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1, 1);
-  }
+@keyframes dialog-popup-out {
+  0%   { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0); opacity: 0; }
 }
 
-@keyframes dialog-genie-out {
-  0% {
-    opacity: 1;
-    transform: scale(1, 1);
-  }
-  60% {
-    opacity: 0.6;
-    transform: translate(calc(var(--genie-tx) * 0.45), calc(var(--genie-ty) * 0.45)) scale(0.2, 0.55);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(var(--genie-tx), var(--genie-ty)) scale(0.05, 0.05);
-  }
-}
-
-/* 直接 target dialog popup，避開 Tailwind arbitrary value 解析的不確定性
- * specificity 0,2,0 高於 utility class，可靠覆寫
- */
 [data-slot="dialog-content"][data-open] {
-  animation: dialog-genie-in 460ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: dialog-popup-in 500ms ease-out forwards;
+  transform-origin: center center;
 }
 [data-slot="dialog-content"][data-closed] {
-  animation: dialog-genie-out 260ms cubic-bezier(0.7, 0, 0.84, 0) forwards;
+  animation: dialog-popup-out 180ms ease-in forwards;
+  transform-origin: center center;
 }
 
 @media (prefers-reduced-motion: reduce) {
