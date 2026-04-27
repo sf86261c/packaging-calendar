@@ -16,6 +16,7 @@ interface SearchResult {
   order_date: string
   status: string
   printed: boolean
+  paid: boolean
   batch_info: string | null
   cake_packaging_id: string | null
   cake_branding_id: string | null
@@ -50,7 +51,7 @@ export default function SearchPage() {
     const { data } = await supabase
       .from('orders')
       .select(`
-        id, customer_name, order_date, status, printed, batch_info,
+        id, customer_name, order_date, status, printed, paid, batch_info,
         cake_packaging_id, cake_branding_id, tube_packaging_id,
         single_cake_packaging_id, single_cake_branding_text,
         cake_pkg:packaging_styles!orders_cake_packaging_id_fkey(name),
@@ -82,6 +83,7 @@ export default function SearchPage() {
           order_date: o.order_date,
           status: o.status,
           printed: o.printed,
+          paid: !!o.paid,
           batch_info: o.batch_info,
           cake_packaging_id: o.cake_packaging_id,
           cake_branding_id: o.cake_branding_id,
@@ -115,6 +117,7 @@ export default function SearchPage() {
       customer_name: r.customer_name,
       status: r.status,
       batch_info: r.batch_info,
+      paid: r.paid,
       cake_packaging_id: r.cake_packaging_id,
       cake_branding_id: r.cake_branding_id,
       tube_packaging_id: r.tube_packaging_id,
@@ -168,6 +171,7 @@ export default function SearchPage() {
                   <div className="text-xs text-gray-400">
                     {r.packaging_summary}
                     {r.printed && ' · ✅ 已列印'}
+                    {r.paid ? ' · 💰 已付款' : ' · 💸 未付款'}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

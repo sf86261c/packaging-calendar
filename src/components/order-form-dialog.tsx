@@ -24,6 +24,7 @@ export interface EditingOrder {
   customer_name: string
   status: string
   batch_info: string | null
+  paid: boolean
   cake_packaging_id: string | null
   cake_branding_id: string | null
   tube_packaging_id: string | null
@@ -68,6 +69,7 @@ export function OrderFormDialog({
   const [formName, setFormName] = useState('')
   const [formStatus, setFormStatus] = useState('')
   const [formBatch, setFormBatch] = useState('')
+  const [formPaid, setFormPaid] = useState(false)
   const [formItems, setFormItems] = useState<Record<string, number>>({})
   const [formCakePackaging, setFormCakePackaging] = useState('')
   const [formCakeBranding, setFormCakeBranding] = useState('')
@@ -101,6 +103,7 @@ export function OrderFormDialog({
       setFormName(editingOrder.customer_name)
       setFormStatus(editingOrder.status)
       setFormBatch(editingOrder.batch_info || '')
+      setFormPaid(!!editingOrder.paid)
       const items: Record<string, number> = {}
       for (const i of editingOrder.items) items[i.productId] = i.quantity
       setFormItems(items)
@@ -121,6 +124,7 @@ export function OrderFormDialog({
     } else {
       setFormDate(initialDate)
       setFormName(''); setFormStatus(''); setFormBatch('')
+      setFormPaid(false)
       setFormItems({})
       setFormCakePackaging(''); setFormCakeBranding('')
       setFormTubePackaging('')
@@ -201,6 +205,7 @@ export function OrderFormDialog({
       customer_name: formName.trim(),
       status: formStatus || '待',
       batch_info: formBatch || null,
+      paid: formPaid,
       cake_packaging_id: formCakePackaging || null,
       cake_branding_id: formCakeBranding || null,
       tube_packaging_id: formTubePackaging || null,
@@ -302,13 +307,26 @@ export function OrderFormDialog({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
+              <Label>付款</Label>
+              <Select value={formPaid ? 'paid' : 'unpaid'} onValueChange={(v) => setFormPaid(v === 'paid')}>
+                <SelectTrigger>
+                  <SelectValue>{formPaid ? '已付款' : '未付款'}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unpaid">未付款</SelectItem>
+                  <SelectItem value="paid">已付款</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label>狀態</Label>
               <Input value={formStatus} onChange={e => setFormStatus(e.target.value)} placeholder="自由輸入" />
             </div>
-            <div>
-              <Label>備註（分批/追加）</Label>
-              <Input value={formBatch} onChange={e => setFormBatch(e.target.value)} placeholder="e.g. 分批2." />
-            </div>
+          </div>
+
+          <div>
+            <Label>備註（分批/追加）</Label>
+            <Input value={formBatch} onChange={e => setFormBatch(e.target.value)} placeholder="e.g. 分批2." />
           </div>
 
           {cakeProducts.length > 0 && (

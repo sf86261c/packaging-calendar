@@ -27,7 +27,7 @@
 | 頁面 | 路由 | 狀態 | 說明 |
 |------|------|------|------|
 | 月曆視圖 | `/calendar` | ✅ 完成 | 月份切換、每日訂單摘要、Realtime、響應式、**日期卡右上角 + 鈕快速新增訂單**（共用 `OrderFormDialog`）、**未來 4 天內含未列印訂單的卡片粉紅警示 + 呼吸燈 badge** |
-| 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除、**資料驅動庫存扣減（product_recipe）**、CSV匯出、Realtime、**今日試吃/耗損/散單 CRUD** |
+| 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除（**編輯時可改訂單日期**）、**付款狀態欄位（列表可一鍵切換 + 編輯 dialog 下拉）**、**資料驅動庫存扣減（product_recipe）**、CSV匯出、Realtime、**今日試吃/耗損/散單 CRUD** |
 | 客戶搜尋 | `/search` | ✅ 完成 | 即時搜尋(ilike)、點擊跳轉日期頁 |
 | 統計儀表板 | `/dashboard` | ✅ 完成 | 6 統計卡片 + 5 Recharts 圖表（含試吃統計） |
 | 產品庫存 | `/inventory` | ✅ 完成 | 蛋糕條/曲奇庫存、日期查詢、Realtime、**安全庫存可 inline 編輯（per-product，存於 products.safety_stock）** |
@@ -65,7 +65,8 @@
 
 ### 訂單功能
 
-- **新增/編輯/刪除**：完整 CRUD（筆圖示=編輯、垃圾桶=刪除）
+- **新增/編輯/刪除**：完整 CRUD（筆圖示=編輯、垃圾桶=刪除）；**編輯訂單時可修改訂單日期**（改日期後該筆會從當前日頁面消失，inventory 記錄同步更新到新日期）
+- **付款狀態（paid）**：訂單列表「印」與「狀態」之間顯示已付款 / 未付款 pill（一鍵切換）；編輯 dialog 在客戶姓名與備註之間新增「付款」下拉；右側統計卡新增付款狀態小卡；CSV 匯出含付款欄位
 - **庫存自動扣減**：
   - cake → 扣 cake_bar（每口味 1 條/盒）
   - tube → 扣 cake_bar（1 條/筒）+ 扣 tube_pkg（選擇的包裝款式）
@@ -160,7 +161,7 @@ packaging_styles — 包裝款式 (name, color_code, category, is_active)
                    category: 適用產品類別 (cake/tube/single_cake)
 branding_styles  — 烙印款式 (name, category, is_active)
                    category: 適用產品類別 (cake/tube/single_cake)
-orders           — 訂單 (order_date, customer_name, status, batch_info, printed,
+orders           — 訂單 (order_date, customer_name, status, batch_info, printed, paid,
                     cake_packaging_id, cake_branding_id,
                     tube_packaging_id,
                     single_cake_packaging_id, single_cake_branding_text)
@@ -224,6 +225,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `015_fix_tube_pkg_data.sql` | 啟用 3 個 tube_pkg 產品，將「馬戲團」改名為「樂園馬戲」對齊 packaging_styles |
 | `016_inventory_rpc.sql` | 新增 4 個 RPC functions（atomic transaction）：replace/delete order/adjustment inventory |
 | `017_product_safety_stock.sql` | products 加 safety_stock 欄位（per-product 可編輯安全庫存）+ backfill 對齊原 hard-coded 值 |
+| `018_order_paid.sql` | orders 加 paid BOOLEAN 欄位（付款狀態，預設 FALSE） |
 
 ## 檔案結構
 
@@ -409,6 +411,23 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-04-27 — 訂單編輯日期可改 + 付款狀態欄位
+
+**需求**：日期卡編輯訂單時希望能改日期；訂單需追蹤付款狀態。
+
+**變更**
+
+| 變更 | 檔案 |
+|---|---|
+| Migration 018：`orders.paid BOOLEAN NOT NULL DEFAULT FALSE` | `supabase/migrations/018_order_paid.sql` |
+| `Order` interface 加 `paid: boolean` | `src/lib/types.ts` |
+| `OrderFormDialog`（共用元件）：`EditingOrder` 加 paid、加 `formPaid` state、UI 在客戶姓名與備註之間插入「付款」下拉、handleSave 寫 paid | `src/components/order-form-dialog.tsx` |
+| `[date]/page.tsx` 內建 dialog：新增 `formDate` state（編輯時可改日期）、Dialog 第一排第一格加日期欄、付款下拉與狀態同列、handleSaveOrder 改用 formDate 寫 orders.order_date 與 inventory.date、`handlePaidToggle` 一鍵切換、訂單列表「印」與「狀態」之間加付款 pill、新增付款狀態統計小卡、CSV 匯出加付款欄、SELECT/mapping 加 paid | `src/app/calendar/[date]/page.tsx` |
+| `search/page.tsx`：SearchResult 加 paid、SELECT 加 paid、結果卡顯示已付款/未付款、openEdit 傳 paid 給 EditingOrder | `src/app/search/page.tsx` |
+
+**Migration（待 Dashboard 執行）**
+- `018_order_paid.sql` — 未執行前所有 paid 寫入皆會失敗（前端會 alert 錯誤）
+
 ### 2026-04-22 — 庫存扣減原子化 + 警示強化
 
 **對策（基於 code review 與 e2e 測試發現）**
@@ -513,10 +532,8 @@ ALTER TABLE stock_adjustments
 
 ### 高優先 ⚠️
 
-1. **執行 Migration 015 + 016 + 017** — 在 Supabase Dashboard > SQL Editor：
-   - `015_fix_tube_pkg_data.sql`：未執行前所有旋轉筒訂單**未扣減 tube_pkg 包裝庫存**
-   - `016_inventory_rpc.sql`：未執行前 RPC 不存在，前端 `replaceOrderInventory` 等呼叫會 alert 錯誤
-   - `017_product_safety_stock.sql`：未執行前 inventory 頁面 safety_stock 顯示為預設 100（編輯儲存會失敗）
+1. **執行 Migration 018** — 在 Supabase Dashboard > SQL Editor：
+   - `018_order_paid.sql`：未執行前 orders 沒有 paid 欄位，新增/編輯訂單會 alert 錯誤、列表的付款 pill 會全部顯示未付款
 
 ### 低優先
 
@@ -528,6 +545,7 @@ ALTER TABLE stock_adjustments
 - ✅ Migration 013/014 已於 Supabase Dashboard 執行（2026-04-22）
 - ✅ Realtime publication 已啟用 5 張表（2026-04-22 端對端測試驗證）
 - ✅ 散單/試吃/耗損 finished mode 補 tube_pkg 扣減（2026-04-22 程式碼修復，待 015 啟用 product 後生效）
+- ✅ Migration 015 + 016 + 017 已執行（2026-04-27 用戶回報完成）
 
 ## 環境資訊
 

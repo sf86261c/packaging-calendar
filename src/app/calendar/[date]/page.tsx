@@ -39,6 +39,7 @@ interface OrderRow {
   status: string
   batch_info: string | null
   printed: boolean
+  paid: boolean
   cake_packaging_id: string | null
   cake_branding_id: string | null
   tube_packaging_id: string | null
@@ -70,9 +71,11 @@ export default function DayOrderPage() {
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null)
 
   // Form state
+  const [formDate, setFormDate] = useState(dateStr)
   const [formName, setFormName] = useState('')
   const [formStatus, setFormStatus] = useState('')
   const [formBatch, setFormBatch] = useState('')
+  const [formPaid, setFormPaid] = useState(false)
   const [formItems, setFormItems] = useState<Record<string, number>>({})
   const [formCakePackaging, setFormCakePackaging] = useState('')
   const [formCakeBranding, setFormCakeBranding] = useState('')
@@ -94,7 +97,7 @@ export default function DayOrderPage() {
     const { data } = await supabase
       .from('orders')
       .select(`
-        id, customer_name, status, batch_info, printed, single_cake_branding_text,
+        id, customer_name, status, batch_info, printed, paid, single_cake_branding_text,
         cake_packaging_id, cake_branding_id, tube_packaging_id, single_cake_packaging_id,
         cake_packaging:packaging_styles!orders_cake_packaging_id_fkey(id, name),
         cake_branding:branding_styles!orders_cake_branding_id_fkey(id, name),
@@ -112,6 +115,7 @@ export default function DayOrderPage() {
         status: o.status,
         batch_info: o.batch_info,
         printed: o.printed,
+        paid: !!o.paid,
         cake_packaging_id: o.cake_packaging_id,
         cake_branding_id: o.cake_branding_id,
         tube_packaging_id: o.tube_packaging_id,
@@ -206,7 +210,9 @@ export default function DayOrderPage() {
   // ─── Form helpers ───────────────────────────────────
 
   const resetForm = () => {
+    setFormDate(dateStr)
     setFormName(''); setFormStatus(''); setFormBatch('')
+    setFormPaid(false)
     setFormItems({})
     setFormCakePackaging(''); setFormCakeBranding('')
     setFormTubePackaging('')
@@ -221,9 +227,11 @@ export default function DayOrderPage() {
 
   const openEditDialog = (order: OrderRow) => {
     setEditingOrderId(order.id)
+    setFormDate(dateStr)
     setFormName(order.customer_name)
     setFormStatus(order.status)
     setFormBatch(order.batch_info || '')
+    setFormPaid(order.paid)
     const items: Record<string, number> = {}
     for (const item of order.items) items[item.productId] = item.quantity
     setFormItems(items)
@@ -324,14 +332,15 @@ export default function DayOrderPage() {
   // ─── Save (add or edit) ─────────────────────────────
 
   const handleSaveOrder = async () => {
-    if (!formName.trim()) return
+    if (!formName.trim() || !formDate) return
     setSaving(true)
 
     const orderData = {
-      order_date: dateStr,
+      order_date: formDate,
       customer_name: formName.trim(),
       status: formStatus || '待',
       batch_info: formBatch || null,
+      paid: formPaid,
       cake_packaging_id: formCakePackaging || null,
       cake_branding_id: formCakeBranding || null,
       tube_packaging_id: formTubePackaging || null,
@@ -382,8 +391,8 @@ export default function DayOrderPage() {
         formTubePackaging || undefined,
         formSingleCakePackaging,
       )
-      // RPC：reverse + apply 在 server 端為單一 transaction
-      await replaceOrderInventory(supabase, orderId, deductions, matResult.deductions, dateStr)
+      // RPC：reverse + apply 在 server 端為單一 transaction（用 formDate，編輯時可能改了日期）
+      await replaceOrderInventory(supabase, orderId, deductions, matResult.deductions, formDate)
       showInventoryWarnings(matResult.missingCombos, missingTubePkg)
 
       resetForm()
@@ -409,6 +418,11 @@ export default function DayOrderPage() {
   const handlePrintedToggle = async (orderId: string, printed: boolean) => {
     await supabase.from('orders').update({ printed }).eq('id', orderId)
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, printed } : o))
+  }
+
+  const handlePaidToggle = async (orderId: string, paid: boolean) => {
+    await supabase.from('orders').update({ paid }).eq('id', orderId)
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, paid } : o))
   }
 
   // ─── Adjustment handlers ────────────────────────────
@@ -571,17 +585,19 @@ export default function DayOrderPage() {
   const singleCount = orders.reduce((s, o) => s + o.items.filter(i => i.category === 'single_cake').reduce((a, i) => a + i.quantity, 0), 0)
   const cookieCount = orders.reduce((s, o) => s + o.items.filter(i => i.category === 'cookie').reduce((a, i) => a + i.quantity, 0), 0)
   const printedCount = orders.filter(o => o.printed).length
+  const paidCount = orders.filter(o => o.paid).length
 
   // ─── Export ──────────────────────────────────────
 
   const handleExportCSV = () => {
     const BOM = '\uFEFF'
-    const headers = ['客戶', '狀態', '備註', '品項', '包裝', '烙印', '已列印']
+    const headers = ['客戶', '付款', '狀態', '備註', '品項', '包裝', '烙印', '已列印']
     const rows = orders.map(o => {
       const items = o.items.map(i => `${i.name} x${i.quantity}`).join('; ')
       const pkgs = orderMeta(o).join('; ')
       return [
         o.customer_name,
+        o.paid ? '已付款' : '未付款',
         o.status,
         o.batch_info || '',
         items,
@@ -683,6 +699,7 @@ export default function DayOrderPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10">印</TableHead>
+                    <TableHead className="w-16">付款</TableHead>
                     <TableHead className="w-16 hidden sm:table-cell">狀態</TableHead>
                     <TableHead className="w-20">客戶</TableHead>
                     <TableHead>品項</TableHead>
@@ -698,6 +715,19 @@ export default function DayOrderPage() {
                           checked={order.printed}
                           onCheckedChange={(checked) => handlePrintedToggle(order.id, !!checked)}
                         />
+                      </TableCell>
+                      <TableCell>
+                        <button
+                          type="button"
+                          onClick={() => handlePaidToggle(order.id, !order.paid)}
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                            order.paid
+                              ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                          }`}
+                        >
+                          {order.paid ? '已付款' : '未付款'}
+                        </button>
                       </TableCell>
                       <TableCell className="hidden sm:table-cell">
                         <span className="text-xs">{order.status}</span>
@@ -738,7 +768,7 @@ export default function DayOrderPage() {
                   ))}
                   {orders.length === 0 && !loading && (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-8 text-center text-gray-400">
+                      <TableCell colSpan={7} className="py-8 text-center text-gray-400">
                         今天還沒有訂單，點擊「新增訂單」開始
                       </TableCell>
                     </TableRow>
@@ -770,6 +800,19 @@ export default function DayOrderPage() {
               <div className="flex items-center justify-between text-sm">
                 <Badge variant="outline" className="border-gray-300 text-gray-500">未列印</Badge>
                 <span>{totalOrders - printedCount}</span>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-sm">付款狀態</CardTitle></CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <Badge variant="outline" className="border-green-400 text-green-700 bg-green-50">已付款</Badge>
+                <span>{paidCount}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <Badge variant="outline" className="border-gray-300 text-gray-500">未付款</Badge>
+                <span>{totalOrders - paidCount}</span>
               </div>
             </CardContent>
           </Card>
@@ -827,13 +870,34 @@ export default function DayOrderPage() {
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) resetForm(); setDialogOpen(open) }}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editingOrderId ? '編輯訂單' : '新增訂單'} — {dateDisplay}</DialogTitle>
+            <DialogTitle>
+              {editingOrderId ? '編輯訂單' : '新增訂單'}
+              {!editingOrderId && ` — ${dateDisplay}`}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <div className="grid grid-cols-2 gap-3">
               <div>
+                <Label>訂單日期 *</Label>
+                <Input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} />
+              </div>
+              <div>
                 <Label>客戶姓名 *</Label>
                 <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="姓名" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>付款</Label>
+                <Select value={formPaid ? 'paid' : 'unpaid'} onValueChange={(v) => setFormPaid(v === 'paid')}>
+                  <SelectTrigger>
+                    <SelectValue>{formPaid ? '已付款' : '未付款'}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unpaid">未付款</SelectItem>
+                    <SelectItem value="paid">已付款</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <Label>狀態</Label>
@@ -964,7 +1028,7 @@ export default function DayOrderPage() {
               </div>
             )}
 
-            <Button className="w-full" onClick={handleSaveOrder} disabled={saving || !formName.trim()}>
+            <Button className="w-full" onClick={handleSaveOrder} disabled={saving || !formName.trim() || !formDate}>
               {saving ? '儲存中...' : editingOrderId ? '儲存變更' : '新增訂單'}
             </Button>
           </div>

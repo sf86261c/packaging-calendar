@@ -32,6 +32,7 @@ export interface Order {
   status: string
   batch_info: string | null
   printed: boolean
+  paid: boolean
   // Per-category packaging/branding
   cake_packaging_id: string | null
   cake_branding_id: string | null
