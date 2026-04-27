@@ -24,19 +24,30 @@ declare global {
 
 if (typeof window !== "undefined" && !window.__dialogGenieListenersInstalled) {
   window.__dialogGenieListenersInstalled = true
-  const recordPointer = (e: PointerEvent) => {
-    lastInteractionX = e.clientX - window.innerWidth / 2
-    lastInteractionY = e.clientY - window.innerHeight / 2
+  const setRootGenie = (x: number, y: number) => {
+    lastInteractionX = x
+    lastInteractionY = y
     lastInteractionAt = performance.now()
+    // 設在 <html> 上，靠 CSS inheritance 傳到 portal 中的 dialog popup，
+    // 避免被 base-ui 覆寫 popup 的 inline style。
+    document.documentElement.style.setProperty("--genie-tx", `${x}px`)
+    document.documentElement.style.setProperty("--genie-ty", `${y}px`)
+  }
+  const recordPointer = (e: PointerEvent) => {
+    setRootGenie(
+      e.clientX - window.innerWidth / 2,
+      e.clientY - window.innerHeight / 2,
+    )
   }
   const recordKey = (e: KeyboardEvent) => {
     if (e.key !== "Enter" && e.key !== " ") return
     const target = e.target as HTMLElement | null
     if (!target?.getBoundingClientRect) return
     const rect = target.getBoundingClientRect()
-    lastInteractionX = rect.left + rect.width / 2 - window.innerWidth / 2
-    lastInteractionY = rect.top + rect.height / 2 - window.innerHeight / 2
-    lastInteractionAt = performance.now()
+    setRootGenie(
+      rect.left + rect.width / 2 - window.innerWidth / 2,
+      rect.top + rect.height / 2 - window.innerHeight / 2,
+    )
   }
   document.addEventListener("pointerdown", recordPointer, true)
   document.addEventListener("keydown", recordKey, true)
@@ -83,28 +94,12 @@ function DialogContent({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
 }) {
-  const popupRef = React.useRef<HTMLDivElement>(null)
-  const useIsoLayoutEffect =
-    typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect
-
-  useIsoLayoutEffect(() => {
-    const el = popupRef.current
-    if (!el) return
-    const recent = performance.now() - lastInteractionAt < 800
-    if (recent) {
-      el.style.setProperty("--genie-tx", `${lastInteractionX}px`)
-      el.style.setProperty("--genie-ty", `${lastInteractionY}px`)
-    } else {
-      el.style.setProperty("--genie-tx", "0px")
-      el.style.setProperty("--genie-ty", "0px")
-    }
-  }, [])
+  // origin 由全域 listener 寫到 <html> 的 CSS variable，popup 透過 inheritance 取用
 
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Popup
-        ref={popupRef}
         data-slot="dialog-content"
         style={style}
         className={cn(

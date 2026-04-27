@@ -137,46 +137,51 @@
  */
 @property --genie-tx {
   syntax: "<length>";
-  inherits: false;
+  inherits: true;
   initial-value: 0px;
 }
 @property --genie-ty {
   syntax: "<length>";
-  inherits: false;
+  inherits: true;
   initial-value: 0px;
 }
 
+/* 注意：Tailwind 4 的 -translate-x-1/2 -translate-y-1/2 用 CSS 獨立屬性 `translate`，
+ * 會與此處的 `transform` 屬性「組合」(translate 屬性先 apply, 再 apply transform)。
+ * 因此 keyframes 不能再寫 translate(-50%, -50%)，否則會疊兩次造成跑出 viewport。
+ * keyframes 只負責 genie offset + scale，居中由 className 的 translate 屬性處理。
+ */
 @keyframes dialog-genie-in {
   0% {
     opacity: 0;
-    transform: translate(-50%, -50%) translate(var(--genie-tx), var(--genie-ty)) scale(0.05, 0.05);
+    transform: translate(var(--genie-tx), var(--genie-ty)) scale(0.05, 0.05);
   }
   30% {
     opacity: 0.85;
-    transform: translate(-50%, -50%) translate(calc(var(--genie-tx) * 0.45), calc(var(--genie-ty) * 0.45)) scale(0.2, 0.55);
+    transform: translate(calc(var(--genie-tx) * 0.45), calc(var(--genie-ty) * 0.45)) scale(0.2, 0.55);
   }
   65% {
     opacity: 1;
-    transform: translate(-50%, -50%) translate(calc(var(--genie-tx) * 0.1), calc(var(--genie-ty) * 0.1)) scale(0.75, 0.92);
+    transform: translate(calc(var(--genie-tx) * 0.1), calc(var(--genie-ty) * 0.1)) scale(0.75, 0.92);
   }
   100% {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1, 1);
+    transform: scale(1, 1);
   }
 }
 
 @keyframes dialog-genie-out {
   0% {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1, 1);
+    transform: scale(1, 1);
   }
   60% {
     opacity: 0.6;
-    transform: translate(-50%, -50%) translate(calc(var(--genie-tx) * 0.45), calc(var(--genie-ty) * 0.45)) scale(0.2, 0.55);
+    transform: translate(calc(var(--genie-tx) * 0.45), calc(var(--genie-ty) * 0.45)) scale(0.2, 0.55);
   }
   100% {
     opacity: 0;
-    transform: translate(-50%, -50%) translate(var(--genie-tx), var(--genie-ty)) scale(0.05, 0.05);
+    transform: translate(var(--genie-tx), var(--genie-ty)) scale(0.05, 0.05);
   }
 }
 
