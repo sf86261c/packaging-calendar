@@ -108,7 +108,7 @@ function DialogContent({
         data-slot="dialog-content"
         style={style}
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 outline-none sm:max-w-sm will-change-transform data-open:[animation:dialog-genie-in_440ms_cubic-bezier(0.34,1.2,0.64,1)_forwards] data-closed:[animation:dialog-genie-out_280ms_cubic-bezier(0.55,0,0.7,0.3)_forwards]",
+          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 outline-none sm:max-w-sm",
           className
         )}
         {...props}

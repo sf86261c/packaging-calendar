@@ -130,46 +130,69 @@
 }
 
 /* macOS Genie-style dialog animation
- * --genie-tx / --genie-ty 為觸發按鈕中心相對 viewport 中心的偏移
- * 沒設定時 fallback 為 0,0（從中央 zoom 出現）
+ * --genie-tx / --genie-ty 為觸發按鈕中心相對 viewport 中心的偏移（由 dialog.tsx 設定）
+ * 沒設定時為 0,0（從中央 zoom 出現）
+ *
+ * 用 @property 註冊讓 var() 在 keyframe 之間平滑插值
  */
+@property --genie-tx {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --genie-ty {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
 @keyframes dialog-genie-in {
   0% {
-    transform: translate(-50%, -50%) translate(var(--genie-tx, 0px), var(--genie-ty, 0px)) scale(0.04, 0.04);
     opacity: 0;
-    filter: blur(2px);
+    transform: translate(-50%, -50%) translate(var(--genie-tx), var(--genie-ty)) scale(0.05, 0.05);
   }
-  35% {
-    transform: translate(-50%, -50%) translate(calc(var(--genie-tx, 0px) * 0.55), calc(var(--genie-ty, 0px) * 0.55)) scale(0.22, 0.5);
-    opacity: 0.7;
-    filter: blur(0.5px);
+  30% {
+    opacity: 0.85;
+    transform: translate(-50%, -50%) translate(calc(var(--genie-tx) * 0.45), calc(var(--genie-ty) * 0.45)) scale(0.2, 0.55);
   }
-  70% {
-    transform: translate(-50%, -50%) translate(calc(var(--genie-tx, 0px) * 0.15), calc(var(--genie-ty, 0px) * 0.15)) scale(0.85, 0.92);
-    opacity: 0.95;
-    filter: blur(0);
+  65% {
+    opacity: 1;
+    transform: translate(-50%, -50%) translate(calc(var(--genie-tx) * 0.1), calc(var(--genie-ty) * 0.1)) scale(0.75, 0.92);
   }
   100% {
-    transform: translate(-50%, -50%) translate(0, 0) scale(1);
     opacity: 1;
-    filter: blur(0);
+    transform: translate(-50%, -50%) scale(1, 1);
   }
 }
 
 @keyframes dialog-genie-out {
   0% {
-    transform: translate(-50%, -50%) translate(0, 0) scale(1);
     opacity: 1;
-    filter: blur(0);
+    transform: translate(-50%, -50%) scale(1, 1);
   }
-  55% {
-    transform: translate(-50%, -50%) translate(calc(var(--genie-tx, 0px) * 0.5), calc(var(--genie-ty, 0px) * 0.5)) scale(0.22, 0.5);
+  60% {
     opacity: 0.6;
-    filter: blur(0.5px);
+    transform: translate(-50%, -50%) translate(calc(var(--genie-tx) * 0.45), calc(var(--genie-ty) * 0.45)) scale(0.2, 0.55);
   }
   100% {
-    transform: translate(-50%, -50%) translate(var(--genie-tx, 0px), var(--genie-ty, 0px)) scale(0.04, 0.04);
     opacity: 0;
-    filter: blur(2px);
+    transform: translate(-50%, -50%) translate(var(--genie-tx), var(--genie-ty)) scale(0.05, 0.05);
+  }
+}
+
+/* 直接 target dialog popup，避開 Tailwind arbitrary value 解析的不確定性
+ * specificity 0,2,0 高於 utility class，可靠覆寫
+ */
+[data-slot="dialog-content"][data-open] {
+  animation: dialog-genie-in 460ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+[data-slot="dialog-content"][data-closed] {
+  animation: dialog-genie-out 260ms cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="dialog-content"][data-open],
+  [data-slot="dialog-content"][data-closed] {
+    animation-duration: 1ms;
   }
 }
