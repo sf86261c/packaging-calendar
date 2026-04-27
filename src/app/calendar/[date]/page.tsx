@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { format, parseISO, addDays, subDays } from 'date-fns'
@@ -33,6 +33,13 @@ import {
 import { StockAdjustmentDialog } from '@/components/stock-adjustment-dialog'
 import type { AdjustmentInput } from '@/components/stock-adjustment-dialog'
 import { SplitOrderDialog, type SplitInput } from '@/components/split-order-dialog'
+
+interface BatchSibling {
+  orderId: string
+  date: string
+  batch_info: string | null
+  items: { name: string; quantity: number }[]
+}
 
 interface OrderRow {
   id: string
@@ -94,6 +101,7 @@ export default function DayOrderPage() {
   } | null>(null)
 
   const [splitDialogOpen, setSplitDialogOpen] = useState(false)
+  const [batchSiblings, setBatchSiblings] = useState<Record<string, BatchSibling[]>>({})
 
   const fetchOrders = useCallback(async () => {
     setLoading(true)
@@ -166,6 +174,55 @@ export default function DayOrderPage() {
       )
     }
   }, [dateStr])
+
+  // 撈所有「同客戶 + 有 batch_info」的訂單作為各筆訂單的兄弟批次。
+  // 限制：以 customer_name + 非 null batch_info 為匹配規則（無 batch_group_id）。
+  // 同客戶不同次分批會混在一起,使用者可從 batch_info 字串(分批1./2./...)分辨。
+  useEffect(() => {
+    const batchedCustomers = Array.from(
+      new Set(orders.filter((o) => o.batch_info).map((o) => o.customer_name)),
+    )
+    if (batchedCustomers.length === 0) {
+      setBatchSiblings({})
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const { data } = await supabase
+        .from('orders')
+        .select(`
+          id, order_date, customer_name, batch_info,
+          order_items(quantity, product:products(name))
+        `)
+        .in('customer_name', batchedCustomers)
+        .not('batch_info', 'is', null)
+
+      if (cancelled || !data) return
+
+      const result: Record<string, BatchSibling[]> = {}
+      for (const o of orders) {
+        if (!o.batch_info) continue
+        result[o.id] = (data as any[])
+          .filter((s) => s.customer_name === o.customer_name && s.id !== o.id)
+          .map((s) => ({
+            orderId: s.id as string,
+            date: s.order_date as string,
+            batch_info: (s.batch_info as string | null) ?? null,
+            items: ((s.order_items || []) as any[])
+              .filter((i) => i.quantity > 0)
+              .map((i) => ({
+                name: (i.product?.name as string) || '',
+                quantity: i.quantity as number,
+              })),
+          }))
+          .sort((a, b) => a.date.localeCompare(b.date))
+      }
+      setBatchSiblings(result)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [orders])
 
   // Static reference data — only fetch once per mount
   useEffect(() => {
@@ -845,64 +902,108 @@ export default function DayOrderPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {orders.map((order) => (
-                    <TableRow key={order.id} className={order.printed ? 'bg-yellow-100' : ''}>
-                      <TableCell>
-                        <Checkbox
-                          checked={order.printed}
-                          onCheckedChange={(checked) => handlePrintedToggle(order.id, !!checked)}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <button
-                          type="button"
-                          onClick={() => handlePaidToggle(order.id, !order.paid)}
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                            order.paid
-                              ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                          }`}
-                        >
-                          {order.paid ? '已付款' : '未付款'}
-                        </button>
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell">
-                        <span className="text-xs">{order.status}</span>
-                        {order.batch_info && <div className="text-[10px] text-gray-500">{order.batch_info}</div>}
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {order.customer_name}
-                        <span className="sm:hidden text-[10px] text-gray-400 block">{order.status}</span>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {order.items.map((item, idx) => (
-                            <Badge key={idx} variant="secondary" className="text-[10px] px-1.5 py-0">
-                              {item.name.replace('旋轉筒-', '🫙').replace('單入-', '📦')} x{item.quantity}
-                            </Badge>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell">
-                        <div className="flex flex-wrap gap-1">
-                          {orderMeta(order).map((m, i) => (
-                            <Badge key={i} variant="outline" className="text-[10px] px-1 py-0">{m}</Badge>
-                          ))}
-                          {orderMeta(order).length === 0 && <span className="text-xs text-gray-300">-</span>}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-400 hover:text-blue-600" onClick={() => openEditDialog(order)}>
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-600" onClick={() => handleDelete(order.id)}>
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {orders.map((order) => {
+                    const siblings = batchSiblings[order.id] || []
+                    return (
+                      <Fragment key={order.id}>
+                        <TableRow className={order.printed ? 'bg-yellow-100' : ''}>
+                          <TableCell>
+                            <Checkbox
+                              checked={order.printed}
+                              onCheckedChange={(checked) => handlePrintedToggle(order.id, !!checked)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <button
+                              type="button"
+                              onClick={() => handlePaidToggle(order.id, !order.paid)}
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                                order.paid
+                                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                              }`}
+                            >
+                              {order.paid ? '已付款' : '未付款'}
+                            </button>
+                          </TableCell>
+                          <TableCell className="hidden sm:table-cell">
+                            <span className="text-xs">{order.status}</span>
+                            {order.batch_info && <div className="text-[10px] text-gray-500">{order.batch_info}</div>}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {order.customer_name}
+                            <span className="sm:hidden text-[10px] text-gray-400 block">{order.status}</span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-1">
+                              {order.items.map((item, idx) => (
+                                <Badge key={idx} variant="secondary" className="text-[10px] px-1.5 py-0">
+                                  {item.name.replace('旋轉筒-', '🫙').replace('單入-', '📦')} x{item.quantity}
+                                </Badge>
+                              ))}
+                            </div>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            <div className="flex flex-wrap gap-1">
+                              {orderMeta(order).map((m, i) => (
+                                <Badge key={i} variant="outline" className="text-[10px] px-1 py-0">{m}</Badge>
+                              ))}
+                              {orderMeta(order).length === 0 && <span className="text-xs text-gray-300">-</span>}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-400 hover:text-blue-600" onClick={() => openEditDialog(order)}>
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-600" onClick={() => handleDelete(order.id)}>
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {siblings.length > 0 && (
+                          <TableRow
+                            data-testid="batch-siblings-row"
+                            className={`hover:bg-transparent ${order.printed ? 'bg-yellow-50' : 'bg-gray-50/40'}`}
+                          >
+                            <TableCell colSpan={7} className="py-1.5 px-3">
+                              <div className="text-[10px] text-gray-400 leading-relaxed">
+                                <span className="text-gray-500 mr-2">↳ 同客戶其他批次:</span>
+                                {siblings.map((s, i) => (
+                                  <span key={s.orderId} className="inline-flex items-center mr-3">
+                                    <button
+                                      type="button"
+                                      onClick={() => router.push(`/calendar/${s.date}`)}
+                                      className="text-gray-600 font-medium hover:text-blue-600 hover:underline"
+                                      title={`跳到 ${s.date}`}
+                                    >
+                                      {format(parseISO(s.date), 'M/d')}
+                                    </button>
+                                    {s.batch_info && (
+                                      <span className="text-gray-400 ml-1">({s.batch_info})</span>
+                                    )}
+                                    <span className="text-gray-300 mx-1.5">·</span>
+                                    {s.items.length === 0 ? (
+                                      <span className="text-gray-300">無品項</span>
+                                    ) : (
+                                      s.items.map((it, j) => (
+                                        <span key={j} className="text-gray-500">
+                                          {it.name.replace('旋轉筒-', '🫙').replace('單入-', '📦')} x{it.quantity}
+                                          {j < s.items.length - 1 && <span className="text-gray-300">, </span>}
+                                        </span>
+                                      ))
+                                    )}
+                                    {i < siblings.length - 1 && <span className="text-gray-200 ml-2">|</span>}
+                                  </span>
+                                ))}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    )
+                  })}
                   {orders.length === 0 && !loading && (
                     <TableRow>
                       <TableCell colSpan={7} className="py-8 text-center text-gray-400">
