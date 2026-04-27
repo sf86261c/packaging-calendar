@@ -151,9 +151,11 @@ export default function CalendarPage() {
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setQuickAddDate(dateStr) }}
                 aria-label={`快速新增 ${dateStr} 訂單`}
-                className="absolute right-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black text-white transition-colors hover:bg-gray-700"
+                className="absolute right-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black text-white opacity-0 scale-50 transition-all duration-300 ease-out group-hover:opacity-100 group-hover:scale-100 focus-visible:opacity-100 focus-visible:scale-100 hover:bg-gray-700"
               >
-                <Plus className="h-5 w-5" strokeWidth={2.5} />
+                <span className="pointer-events-none absolute inset-0 rounded-full bg-black opacity-40 animate-ping" aria-hidden />
+                <span className="pointer-events-none absolute -inset-1 rounded-full ring-2 ring-black/30 animate-ping [animation-delay:300ms]" aria-hidden />
+                <Plus className="relative h-5 w-5" strokeWidth={2.5} />
               </button>
               <div className={`text-sm font-medium ${
                 urgent ? 'text-pink-700' : today ? 'text-blue-700' : 'text-gray-700'
