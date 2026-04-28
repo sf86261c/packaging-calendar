@@ -471,8 +471,8 @@ ALTER TABLE stock_adjustments
 | 側欄移除「包材」 | `src/components/app-shell.tsx` |
 | 叫貨 API per-item lead + show_in_inventory 過濾 | `src/app/api/line-notify/route.ts` |
 
-**Migration（待 Dashboard 執行）**
-- `019_product_lead_time_visibility.sql` — 未執行前所有產品的 `lead_time_days` / `show_in_inventory` 不存在，inline 編輯會 alert 錯誤、曲奇隱藏切換無效
+**Migration**
+- `019_product_lead_time_visibility.sql` — 已於 2026-04-28 執行
 
 ### 2026-04-27 — 分批/追加複製訂單
 
@@ -513,8 +513,8 @@ ALTER TABLE stock_adjustments
 | `[date]/page.tsx` 內建 dialog：新增 `formDate` state（編輯時可改日期）、Dialog 第一排第一格加日期欄、付款下拉與狀態同列、handleSaveOrder 改用 formDate 寫 orders.order_date 與 inventory.date、`handlePaidToggle` 一鍵切換、訂單列表「印」與「狀態」之間加付款 pill、新增付款狀態統計小卡、CSV 匯出加付款欄、SELECT/mapping 加 paid | `src/app/calendar/[date]/page.tsx` |
 | `search/page.tsx`：SearchResult 加 paid、SELECT 加 paid、結果卡顯示已付款/未付款、openEdit 傳 paid 給 EditingOrder | `src/app/search/page.tsx` |
 
-**Migration（待 Dashboard 執行）**
-- `018_order_paid.sql` — 未執行前所有 paid 寫入皆會失敗（前端會 alert 錯誤）
+**Migration**
+- `018_order_paid.sql` — 已於 2026-04-28 執行
 
 ### 2026-04-22 — 庫存扣減原子化 + 警示強化
 
@@ -618,12 +618,6 @@ ALTER TABLE stock_adjustments
 
 ## 未完成事項
 
-### 高優先 ⚠️
-
-1. **執行 Migration 018 + 019** — 在 Supabase Dashboard > SQL Editor：
-   - `018_order_paid.sql`：未執行前 orders 沒有 paid 欄位，新增/編輯訂單會 alert 錯誤、列表的付款 pill 會全部顯示未付款
-   - `019_product_lead_time_visibility.sql`：未執行前 products 沒有 lead_time_days / show_in_inventory 欄位，庫存頁的 D+N 編輯與曲奇隱藏切換會 alert 錯誤
-
 ### 低優先
 
 1. **自訂域名** — 可在 Vercel Dashboard > Domains 設定
@@ -635,6 +629,7 @@ ALTER TABLE stock_adjustments
 - ✅ Realtime publication 已啟用 5 張表（2026-04-22 端對端測試驗證）
 - ✅ 散單/試吃/耗損 finished mode 補 tube_pkg 扣減（2026-04-22 程式碼修復，待 015 啟用 product 後生效）
 - ✅ Migration 015 + 016 + 017 已執行（2026-04-27 用戶回報完成）
+- ✅ Migration 018 + 019 已執行（2026-04-28 用戶回報完成 — 付款狀態欄位、per-product lead_time/可見性 全面啟用）
 
 ## 環境資訊
 
