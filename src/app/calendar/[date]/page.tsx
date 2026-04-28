@@ -1043,16 +1043,6 @@ export default function DayOrderPage() {
               <Button size="sm" onClick={openNewDialog}>
                 <Plus className="mr-1 h-4 w-4" /> 新增訂單
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setEditingAdjustment(null)
-                  setAdjustmentDialogOpen(true)
-                }}
-              >
-                🍰 今日試吃/耗損/散單
-              </Button>
             </div>
           </CardHeader>
           <CardContent className="p-0">

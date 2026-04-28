@@ -10,6 +10,14 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { OrderFormDialog } from '@/components/order-form-dialog'
+import { StockAdjustmentDialog, type AdjustmentInput } from '@/components/stock-adjustment-dialog'
+import {
+  calculateIngredientDeductions,
+  calculateMaterialDeductions as calcMaterialDeductionsHelper,
+  replaceAdjustmentInventory,
+} from '@/lib/stock'
+import { logActivity } from '@/lib/activity'
+import type { Product, PackagingStyle, ProductRecipe, ProductMaterialUsage } from '@/lib/types'
 
 interface DaySummary {
   orders: number
@@ -43,6 +51,13 @@ export default function CalendarPage() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchLoading, setSearchLoading] = useState(false)
   const searchBoxRef = useRef<HTMLDivElement>(null)
+
+  // 今日試吃/耗損/散單 dialog
+  const [adjustmentOpen, setAdjustmentOpen] = useState(false)
+  const [products, setProducts] = useState<Product[]>([])
+  const [packagingStyles, setPackagingStyles] = useState<PackagingStyle[]>([])
+  const [recipes, setRecipes] = useState<ProductRecipe[]>([])
+  const [materialUsages, setMaterialUsages] = useState<ProductMaterialUsage[]>([])
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -114,6 +129,127 @@ export default function CalendarPage() {
     return () => clearTimeout(timer)
   }, [materialWarning])
 
+  // mount 時抓取參考資料（試吃/耗損/散單 dialog 需要）
+  useEffect(() => {
+    Promise.all([
+      supabase.from('products').select('*').eq('is_active', true).order('sort_order'),
+      supabase.from('packaging_styles').select('*').eq('is_active', true),
+      supabase.from('product_material_usage').select('id, product_id, material_id, packaging_style_id, quantity_per_unit'),
+      supabase.from('product_recipe').select('id, product_id, ingredient_id, quantity_per_unit, created_at'),
+    ]).then(([pr, pk, mu, r]) => {
+      if (pr.data) setProducts(pr.data as Product[])
+      if (pk.data) setPackagingStyles(pk.data as PackagingStyle[])
+      if (mu.data) setMaterialUsages(mu.data as ProductMaterialUsage[])
+      if (r.data) setRecipes(r.data as ProductRecipe[])
+    })
+  }, [])
+
+  // 新增今日試吃/耗損/散單
+  const handleSaveAdjustment = async (value: AdjustmentInput) => {
+    const todayStr = format(new Date(), 'yyyy-MM-dd')
+    try {
+      const r = await supabase
+        .from('stock_adjustments')
+        .insert({
+          date: todayStr,
+          adjustment_type: value.adjustmentType,
+          note: value.note || null,
+        })
+        .select()
+        .single()
+      if (r.error || !r.data) throw new Error(`建立調整失敗：${r.error?.message ?? 'no data'}`)
+      const adjustmentId = r.data.id
+
+      const itemRows = value.items.map((i) => ({
+        adjustment_id: adjustmentId,
+        product_id: i.productId,
+        quantity: parseFloat(i.quantity),
+        deduct_mode: i.deductMode,
+        packaging_style_id: i.packagingStyleId || null,
+      }))
+      const r3 = await supabase.from('stock_adjustment_items').insert(itemRows)
+      if (r3.error) throw new Error(`寫入扣減項失敗：${r3.error.message}`)
+
+      // 分類 finished vs ingredient
+      const finishedEntries: [string, number][] = []
+      const finishedPackaging: Record<string, string | null> = {}
+      const directDeductions: Record<string, number> = {}
+      for (const i of value.items) {
+        const qty = parseFloat(i.quantity)
+        if (i.deductMode === 'finished') {
+          finishedEntries.push([i.productId, qty])
+          finishedPackaging[i.productId] = i.packagingStyleId || null
+        } else {
+          directDeductions[i.productId] = (directDeductions[i.productId] || 0) + qty
+        }
+      }
+
+      const totalIngredient: Record<string, number> = { ...directDeductions }
+      let totalMaterial: Record<string, number> = {}
+      const adjMissingTubePkg: string[] = []
+      let adjMissingMaterial: { productName: string; packagingName: string | null }[] = []
+
+      if (finishedEntries.length > 0) {
+        const ingr = calculateIngredientDeductions(finishedEntries, recipes)
+        for (const [k, v] of Object.entries(ingr)) {
+          totalIngredient[k] = (totalIngredient[k] || 0) + v
+        }
+        // tube_pkg 特例（散單/試吃選旋轉筒也要扣包裝庫存）
+        for (const [productId, qty] of finishedEntries) {
+          const product = products.find((p) => p.id === productId)
+          if (product?.category !== 'tube') continue
+          const pkgStyleId = finishedPackaging[productId]
+          if (!pkgStyleId) continue
+          const pkgName = packagingStyles.find((ps) => ps.id === pkgStyleId)?.name
+          if (!pkgName) continue
+          const tubePkgProduct = products.find((p) => p.category === 'tube_pkg' && p.name === pkgName)
+          if (tubePkgProduct) {
+            totalIngredient[tubePkgProduct.id] = (totalIngredient[tubePkgProduct.id] || 0) + qty
+          } else if (!adjMissingTubePkg.includes(pkgName)) {
+            adjMissingTubePkg.push(pkgName)
+          }
+        }
+        const matResult = calcMaterialDeductionsHelper(
+          finishedEntries,
+          products,
+          materialUsages,
+          (productId) => finishedPackaging[productId] ?? null,
+          (id) => packagingStyles.find((ps) => ps.id === id)?.name ?? null,
+        )
+        totalMaterial = matResult.deductions
+        adjMissingMaterial = matResult.missingCombos
+      }
+
+      // 包材警示（沿用月曆頁的 materialWarning）
+      const sections: string[] = []
+      if (adjMissingMaterial.length > 0) {
+        const lines = adjMissingMaterial.map((c) =>
+          `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`,
+        )
+        sections.push(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
+      }
+      if (adjMissingTubePkg.length > 0) {
+        const lines = adjMissingTubePkg.map((n) => `· ${n}`)
+        sections.push(`以下旋轉筒包裝款式找不到對應的 tube_pkg 產品（已停用或名稱不符），未扣減包裝庫存：\n${lines.join('\n')}`)
+      }
+      if (sections.length > 0) setMaterialWarning(sections.join('\n\n'))
+
+      await replaceAdjustmentInventory(supabase, adjustmentId, totalIngredient, totalMaterial, todayStr)
+
+      const typeLabel =
+        value.adjustmentType === 'sample' ? '試吃' :
+        value.adjustmentType === 'waste' ? '耗損' : '散單'
+      await logActivity(`新增${typeLabel}紀錄`, `adjustment:${adjustmentId}`, {
+        類型: typeLabel,
+        日期: todayStr,
+        品項數: value.items.length,
+      })
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err))
+      throw err
+    }
+  }
+
   const days = useMemo(() => {
     const monthStart = startOfMonth(currentMonth)
     const monthEnd = endOfMonth(currentMonth)
@@ -176,6 +312,14 @@ export default function CalendarPage() {
         </h1>
         <div className="flex items-center gap-2">
           {loading && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setAdjustmentOpen(true)}
+            className="h-9 text-xs"
+          >
+            🍰 今日試吃/耗損/散單
+          </Button>
           <div ref={searchBoxRef} className="relative">
             <form onSubmit={handleSearchSubmit}>
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -328,6 +472,14 @@ export default function CalendarPage() {
         initialDate={quickAddDate || ''}
         onSaved={fetchData}
         onWarning={setMaterialWarning}
+      />
+
+      <StockAdjustmentDialog
+        open={adjustmentOpen}
+        onOpenChange={setAdjustmentOpen}
+        products={products}
+        packagingStyles={packagingStyles}
+        onSave={handleSaveAdjustment}
       />
     </div>
   )

@@ -426,6 +426,29 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-04-28 — 「今日試吃/耗損/散單」入口從日頁面移到月曆頁
+
+**變更**
+- 月曆頁右上角搜尋框左邊新增按鈕「🍰 今日試吃/耗損/散單」，點擊開啟 `StockAdjustmentDialog`
+- Dialog 寫入時 date 一律為 `today`（`format(new Date(), 'yyyy-MM-dd')`），取代舊的「該頁日期」邏輯
+- 月曆頁 mount 時抓 products / packaging_styles / product_recipe / product_material_usage 作為 dialog 與 inventory 計算所需參考資料
+- `handleSaveAdjustment` 邏輯比照日頁面：finished/ingredient 分類 → recipe 展開 → tube_pkg 特例 → material 對照 → `replaceAdjustmentInventory` RPC → activity log；包材警示沿用月曆頁 `materialWarning` state（8 秒自動消失）
+- 日頁面（`[date]/page.tsx`）：移除右上角的「🍰 今日試吃/耗損/散單」按鈕（只是新增入口）；保留 list 顯示與每筆紀錄的編輯/刪除 icon、`StockAdjustmentDialog` state、`handleSaveAdjustment / handleDeleteAdjustment / handleEditAdjustment` handler — 編輯既有紀錄的流程不變
+
+**取捨**
+- 「新增」入口統一在月曆頁的 today，符合實際業務（試吃/耗損/散單通常是當下記錄）
+- 日頁面仍可看/編輯該日期的既有紀錄，但無法直接「新增該日期的非 today 紀錄」（極少情境）
+- 月曆頁的 dialog 為「新增 only」流程，無 list、無編輯模式，邏輯精簡
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| 月曆頁加按鈕 + reference data fetch + handleSaveAdjustment + Dialog 元件 | `src/app/calendar/page.tsx` |
+| 日頁面移除「新增」按鈕（保留 dialog state 與 handler） | `src/app/calendar/[date]/page.tsx` |
+
+---
+
 ### 2026-04-28 — 追加 dialog UI 細修（單口味隱藏 + 文字截斷）
 
 **修正**
