@@ -19,11 +19,22 @@ function notify() {
   for (const l of listeners) l()
 }
 
+// useSyncExternalStore 要求 getSnapshot 在資料未變時回傳「同一物件 reference」，
+// 否則會被 React 視為持續變動而觸發無限 re-render（minified error #185）。
+// 因此在 module level cache 解析結果，只有 raw string 變化時才重新 parse。
+let cachedRaw: string | null = null
+let cachedUser: AuthUser | null = null
+
 function readUser(): AuthUser | null {
   if (typeof window === 'undefined') return null
+  const raw = window.localStorage.getItem(STORAGE_KEY)
+  if (raw === cachedRaw) return cachedUser
+  cachedRaw = raw
+  if (!raw) {
+    cachedUser = null
+    return cachedUser
+  }
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
     const parsed = JSON.parse(raw)
     if (
       parsed &&
@@ -31,12 +42,14 @@ function readUser(): AuthUser | null {
       typeof parsed.username === 'string' &&
       typeof parsed.is_admin === 'boolean'
     ) {
-      return parsed
+      cachedUser = parsed as AuthUser
+    } else {
+      cachedUser = null
     }
-    return null
   } catch {
-    return null
+    cachedUser = null
   }
+  return cachedUser
 }
 
 function writeUser(user: AuthUser | null) {
