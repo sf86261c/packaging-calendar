@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   Calendar, BarChart3, Package, Settings, ScrollText,
-  Menu, LogIn, LogOut, User as UserIcon,
+  Menu, LogOut, User as UserIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
@@ -33,17 +33,38 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, mounted } = useCurrentUserClient()
   const [mobileOpen, setMobileOpen] = useState(false)
 
-  const visibleNav = navItems.filter((item) => !item.adminOnly || user?.is_admin)
+  const isLoginPage = pathname === '/login'
 
-  const handleSignOut = async () => {
-    if (user) {
-      await logActivity('帳號.登出', `user:${user.id}`, { username: user.username })
+  // 全域 guard：未登入強制跳轉 /login（除了 /login 頁本身）
+  useEffect(() => {
+    if (mounted && !user && !isLoginPage) {
+      router.replace('/login')
     }
-    signOut()
-    router.push('/login')
+  }, [mounted, user, isLoginPage, router])
+
+  // /login 頁不顯示側邊欄
+  if (isLoginPage) {
+    return <main className="min-h-screen bg-background p-4 md:p-6">{children}</main>
   }
 
-  const NavLinks = ({ currentUser }: { currentUser: AuthUser | null }) => (
+  // 還沒讀完 localStorage、或讀完發現未登入時，顯示空白避免閃過內容
+  if (!mounted || !user) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">驗證中...</p>
+      </main>
+    )
+  }
+
+  const visibleNav = navItems.filter((item) => !item.adminOnly || user.is_admin)
+
+  const handleSignOut = async () => {
+    await logActivity('帳號.登出', `user:${user.id}`, { username: user.username })
+    signOut()
+    router.replace('/login')
+  }
+
+  const NavLinks = ({ currentUser }: { currentUser: AuthUser }) => (
     <nav className="flex h-full flex-col p-3">
       <div className="mb-4 px-3 py-2">
         <h1 className="text-lg font-bold text-foreground">📦 包裝行事曆</h1>
@@ -71,39 +92,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <div className="mt-auto border-t border-sidebar-border pt-3">
-        {currentUser ? (
-          <div className="space-y-2 px-1">
-            <div className="flex items-center gap-2 rounded-lg bg-accent/40 px-3 py-2">
-              <UserIcon className="h-4 w-4 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-foreground">
-                  {currentUser.username}
-                </p>
-                <p className="text-[10px] text-muted-foreground">
-                  {currentUser.is_admin ? '管理員' : '一般使用者'}
-                </p>
-              </div>
+        <div className="space-y-2 px-1">
+          <div className="flex items-center gap-2 rounded-lg bg-accent/40 px-3 py-2">
+            <UserIcon className="h-4 w-4 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-foreground">
+                {currentUser.username}
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                {currentUser.is_admin ? '管理員' : '一般使用者'}
+              </p>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleSignOut}
-              className="w-full justify-start gap-2"
-            >
-              <LogOut className="h-4 w-4" />
-              登出
-            </Button>
           </div>
-        ) : mounted ? (
-          <Link
-            href="/login"
-            onClick={() => setMobileOpen(false)}
-            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleSignOut}
+            className="w-full justify-start gap-2"
           >
-            <LogIn className="h-5 w-5" />
-            登入 / 註冊
-          </Link>
-        ) : null}
+            <LogOut className="h-4 w-4" />
+            登出
+          </Button>
+        </div>
       </div>
     </nav>
   )
@@ -128,9 +138,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 📦 包裝行事曆
               </span>
             </div>
-            {mounted && user && (
-              <span className="text-xs text-muted-foreground">{user.username}</span>
-            )}
+            <span className="text-xs text-muted-foreground">{user.username}</span>
           </header>
 
           {/* Main content */}
