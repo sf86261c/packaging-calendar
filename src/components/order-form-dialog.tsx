@@ -269,10 +269,17 @@ export function OrderFormDialog({
 
       // 細化 action：新增 / 改日期 / 改數量 / 改日期+改數量 / 編輯訂單
       let activityAction = '新增訂單'
+      const itemsLabel = itemEntries
+        .map(([pid, q]) => {
+          const product = products.find((p: { id: string; name: string }) => p.id === pid)
+          return `${product?.name ?? '?'} ×${q}`
+        })
+        .join('、')
       const meta: Record<string, unknown> = {
         客戶: orderData.customer_name,
         日期: orderData.order_date,
-        付款: orderData.paid ? '已付款' : '未付款',
+        付款狀態: orderData.paid ? '已付款' : '未付款',
+        品項: itemsLabel || '無品項',
       }
       if (editingOrder) {
         const dateChanged = editingOrder.order_date !== formDate
@@ -294,9 +301,17 @@ export function OrderFormDialog({
         else if (itemsChanged) activityAction = '改數量'
         else activityAction = '編輯訂單'
         if (dateChanged) meta['原日期'] = editingOrder.order_date
+        if (itemsChanged) {
+          const oldLabel = Object.entries(oldItems)
+            .filter(([, q]) => q > 0)
+            .map(([pid, q]) => {
+              const product = products.find((p: { id: string; name: string }) => p.id === pid)
+              return `${product?.name ?? '?'} ×${q}`
+            })
+            .join('、')
+          if (oldLabel) meta['原品項'] = oldLabel
+        }
       }
-      const totalQty = itemEntries.reduce((s, [, q]) => s + q, 0)
-      meta['品項總數'] = totalQty
       await logActivity(activityAction, `order:${orderId}`, meta)
 
       if (onWarning) {
