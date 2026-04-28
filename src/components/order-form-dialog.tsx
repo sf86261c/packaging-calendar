@@ -17,6 +17,7 @@ import {
   calculateMaterialDeductions as calcMaterialDeductionsHelper,
   replaceOrderInventory,
 } from '@/lib/stock'
+import { logActivity } from '@/lib/activity'
 
 export interface EditingOrder {
   id: string
@@ -265,6 +266,17 @@ export function OrderFormDialog({
 
       // RPC：DELETE old + INSERT new 在 server 端為單一 transaction
       await replaceOrderInventory(supabase, orderId, invDeductions, matResult.deductions, formDate)
+
+      await logActivity(
+        editingOrder ? '訂單.編輯' : '訂單.新增',
+        `order:${orderId}`,
+        {
+          customer: orderData.customer_name,
+          date: orderData.order_date,
+          item_count: itemEntries.length,
+          paid: orderData.paid,
+        },
+      )
 
       if (onWarning) {
         const sections: string[] = []

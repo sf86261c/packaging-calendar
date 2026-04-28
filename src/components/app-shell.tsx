@@ -2,49 +2,109 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
-  Calendar, BarChart3, Package, Settings,
-  Menu,
+  Calendar, BarChart3, Package, Settings, ScrollText,
+  Menu, LogIn, LogOut, User as UserIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
+import { useCurrentUserClient, signOut, type AuthUser } from '@/lib/auth'
+import { logActivity } from '@/lib/activity'
 
-const navItems = [
+interface NavItem {
+  href: string
+  label: string
+  icon: typeof Calendar
+  adminOnly?: boolean
+}
+
+const navItems: NavItem[] = [
   { href: '/calendar', label: '月曆', icon: Calendar },
   { href: '/dashboard', label: '統計', icon: BarChart3 },
   { href: '/inventory', label: '庫存', icon: Package },
-  { href: '/settings', label: '設定', icon: Settings },
+  { href: '/activity', label: '紀錄', icon: ScrollText },
+  { href: '/settings', label: '設定', icon: Settings, adminOnly: true },
 ]
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
+  const { user, mounted } = useCurrentUserClient()
   const [mobileOpen, setMobileOpen] = useState(false)
 
-  const NavLinks = () => (
-    <nav className="flex flex-col gap-1 p-3">
+  const visibleNav = navItems.filter((item) => !item.adminOnly || user?.is_admin)
+
+  const handleSignOut = async () => {
+    if (user) {
+      await logActivity('帳號.登出', `user:${user.id}`, { username: user.username })
+    }
+    signOut()
+    router.push('/login')
+  }
+
+  const NavLinks = ({ currentUser }: { currentUser: AuthUser | null }) => (
+    <nav className="flex h-full flex-col p-3">
       <div className="mb-4 px-3 py-2">
         <h1 className="text-lg font-bold text-foreground">📦 包裝行事曆</h1>
         <p className="text-xs text-muted-foreground">排程管理系統</p>
       </div>
-      {navItems.map((item) => {
-        const isActive = pathname.startsWith(item.href)
-        return (
+      <div className="flex flex-col gap-1">
+        {visibleNav.map((item) => {
+          const isActive = pathname.startsWith(item.href)
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={() => setMobileOpen(false)}
+              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                isActive
+                  ? 'bg-accent text-accent-foreground'
+                  : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
+              }`}
+            >
+              <item.icon className="h-5 w-5" />
+              {item.label}
+            </Link>
+          )
+        })}
+      </div>
+
+      <div className="mt-auto border-t border-sidebar-border pt-3">
+        {currentUser ? (
+          <div className="space-y-2 px-1">
+            <div className="flex items-center gap-2 rounded-lg bg-accent/40 px-3 py-2">
+              <UserIcon className="h-4 w-4 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-foreground">
+                  {currentUser.username}
+                </p>
+                <p className="text-[10px] text-muted-foreground">
+                  {currentUser.is_admin ? '管理員' : '一般使用者'}
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleSignOut}
+              className="w-full justify-start gap-2"
+            >
+              <LogOut className="h-4 w-4" />
+              登出
+            </Button>
+          </div>
+        ) : mounted ? (
           <Link
-            key={item.href}
-            href={item.href}
+            href="/login"
             onClick={() => setMobileOpen(false)}
-            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-              isActive
-                ? 'bg-accent text-accent-foreground'
-                : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
-            }`}
+            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent/60 hover:text-foreground"
           >
-            <item.icon className="h-5 w-5" />
-            {item.label}
+            <LogIn className="h-5 w-5" />
+            登入 / 註冊
           </Link>
-        )
-      })}
+        ) : null}
+      </div>
     </nav>
   )
 
@@ -52,7 +112,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen bg-background">
       {/* Desktop sidebar */}
       <aside className="hidden w-56 border-r border-sidebar-border bg-sidebar md:block">
-        <NavLinks />
+        <NavLinks currentUser={user} />
       </aside>
 
       {/* Mobile sidebar */}
@@ -68,6 +128,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 📦 包裝行事曆
               </span>
             </div>
+            {mounted && user && (
+              <span className="text-xs text-muted-foreground">{user.username}</span>
+            )}
           </header>
 
           {/* Main content */}
@@ -77,7 +140,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <SheetContent side="left" className="w-56 p-0">
-          <NavLinks />
+          <NavLinks currentUser={user} />
         </SheetContent>
       </Sheet>
     </div>

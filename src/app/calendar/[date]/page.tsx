@@ -33,6 +33,7 @@ import {
 import { StockAdjustmentDialog } from '@/components/stock-adjustment-dialog'
 import type { AdjustmentInput } from '@/components/stock-adjustment-dialog'
 import { SplitOrderDialog, type SplitInput, type AppendInput } from '@/components/split-order-dialog'
+import { logActivity } from '@/lib/activity'
 
 interface BatchSibling {
   orderId: string
@@ -475,8 +476,13 @@ export default function DayOrderPage() {
 
   const handleDelete = async (orderId: string) => {
     if (!confirm('確定要刪除這筆訂單嗎？')) return
+    const target = orders.find((o) => o.id === orderId)
     try {
       await deleteOrderWithInventory(supabase, orderId)
+      await logActivity('訂單.刪除', `order:${orderId}`, {
+        customer: target?.customer_name,
+        date: dateStr,
+      })
       fetchOrders()
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err))
@@ -486,11 +492,19 @@ export default function DayOrderPage() {
   const handlePrintedToggle = async (orderId: string, printed: boolean) => {
     await supabase.from('orders').update({ printed }).eq('id', orderId)
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, printed } : o))
+    const target = orders.find((o) => o.id === orderId)
+    await logActivity(printed ? '訂單.列印' : '訂單.取消列印', `order:${orderId}`, {
+      customer: target?.customer_name,
+    })
   }
 
   const handlePaidToggle = async (orderId: string, paid: boolean) => {
     await supabase.from('orders').update({ paid }).eq('id', orderId)
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, paid } : o))
+    const target = orders.find((o) => o.id === orderId)
+    await logActivity(paid ? '訂單.標記已付款' : '訂單.標記未付款', `order:${orderId}`, {
+      customer: target?.customer_name,
+    })
   }
 
   // ─── Split / Append 分批 ─────────────────────────────
@@ -746,6 +760,15 @@ export default function DayOrderPage() {
       // RPC：reverse + apply 為 atomic
       await replaceAdjustmentInventory(supabase, adjustmentId, totalIngredient, totalMaterial, dateStr)
 
+      await logActivity(
+        editingAdjustment ? '試吃耗損散單.編輯' : '試吃耗損散單.新增',
+        `adjustment:${adjustmentId}`,
+        {
+          type: value.adjustmentType,
+          item_count: value.items.length,
+        },
+      )
+
       setEditingAdjustment(null)
       fetchAdjustments()
     } catch (err) {
@@ -757,6 +780,7 @@ export default function DayOrderPage() {
     if (!confirm('確定刪除此筆試吃/耗損？相關庫存扣減會一併回沖。')) return
     try {
       await deleteAdjustmentWithInventory(supabase, id)
+      await logActivity('試吃耗損散單.刪除', `adjustment:${id}`)
       fetchAdjustments()
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err))

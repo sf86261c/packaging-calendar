@@ -1,12 +1,15 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useCurrentUserClient } from '@/lib/auth'
+import { logActivity } from '@/lib/activity'
 import {
   Dialog,
   DialogContent,
@@ -198,6 +201,8 @@ function ActiveToggle({
 
 export default function SettingsPage() {
   const supabase = createClient()
+  const { user, mounted } = useCurrentUserClient()
+  const isAdmin = !!user?.is_admin
 
   // --- State ---------------------------------------------------------------
   const [products, setProducts] = useState<Product[]>([])
@@ -334,6 +339,8 @@ export default function SettingsPage() {
       }
     }
 
+    await logActivity('設定.產品.編輯', `product:${editingProductId}`, { name: trimmed })
+
     resetProductForm()
     setProductDialogOpen(false)
     fetchProducts()
@@ -406,6 +413,11 @@ export default function SettingsPage() {
       }
     }
 
+    await logActivity('設定.產品.新增', `product:${newProductId}`, {
+      category: newProductCategory,
+      name: trimmed,
+    })
+
     resetProductForm()
     setProductDialogOpen(false)
     fetchProducts()
@@ -415,6 +427,7 @@ export default function SettingsPage() {
 
   const updateProductName = async (id: string, name: string) => {
     await supabase.from('products').update({ name }).eq('id', id)
+    await logActivity('設定.產品.改名', `product:${id}`, { name })
     fetchProducts()
   }
 
@@ -423,6 +436,10 @@ export default function SettingsPage() {
       .from('products')
       .update({ is_active: !currentActive })
       .eq('id', id)
+    await logActivity(
+      currentActive ? '設定.產品.停用' : '設定.產品.啟用',
+      `product:${id}`,
+    )
     fetchProducts()
   }
 
@@ -435,6 +452,10 @@ export default function SettingsPage() {
       alert(`切換常用狀態失敗：${error.message}`)
       return
     }
+    await logActivity(
+      currentCommon ? '設定.產品.改為特殊組合' : '設定.產品.改為常用組合',
+      `product:${id}`,
+    )
     fetchProducts()
   }
 
@@ -509,6 +530,8 @@ export default function SettingsPage() {
       alert(`新增失敗：${error.message}`)
       return
     }
+    await logActivity('設定.包裝.新增', null, { name: trimmed, category: newPackagingCategory })
+
     setNewPackagingName('')
     setNewPackagingColor('#000000')
     setNewPackagingCategory('')
@@ -521,6 +544,7 @@ export default function SettingsPage() {
     fields: Partial<Pick<PackagingStyle, 'name' | 'color_code'>>
   ) => {
     await supabase.from('packaging_styles').update(fields).eq('id', id)
+    await logActivity('設定.包裝.編輯', `packaging:${id}`, fields as Record<string, unknown>)
     fetchPackagingStyles()
   }
 
@@ -529,6 +553,10 @@ export default function SettingsPage() {
       .from('packaging_styles')
       .update({ is_active: !currentActive })
       .eq('id', id)
+    await logActivity(
+      currentActive ? '設定.包裝.停用' : '設定.包裝.啟用',
+      `packaging:${id}`,
+    )
     fetchPackagingStyles()
   }
 
@@ -545,6 +573,8 @@ export default function SettingsPage() {
       alert(`新增失敗：${error.message}`)
       return
     }
+    await logActivity('設定.烙印.新增', null, { name: trimmed, category: newBrandingCategory })
+
     setNewBrandingName('')
     setNewBrandingCategory('')
     setBrandingDialogOpen(false)
@@ -553,6 +583,7 @@ export default function SettingsPage() {
 
   const updateBrandingName = async (id: string, name: string) => {
     await supabase.from('branding_styles').update({ name }).eq('id', id)
+    await logActivity('設定.烙印.改名', `branding:${id}`, { name })
     fetchBrandingStyles()
   }
 
@@ -561,6 +592,10 @@ export default function SettingsPage() {
       .from('branding_styles')
       .update({ is_active: !currentActive })
       .eq('id', id)
+    await logActivity(
+      currentActive ? '設定.烙印.停用' : '設定.烙印.啟用',
+      `branding:${id}`,
+    )
     fetchBrandingStyles()
   }
 
@@ -595,11 +630,46 @@ export default function SettingsPage() {
     {}
   )
 
+  // --- Admin guard --------------------------------------------------------
+  if (!mounted) {
+    return (
+      <div className="mx-auto max-w-2xl">
+        <p className="py-12 text-center text-sm text-muted-foreground">載入中...</p>
+      </div>
+    )
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="mx-auto max-w-md">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">🔒 無權限存取</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              設定頁面僅限管理員操作。
+              {user
+                ? ` 目前帳號 ${user.username} 並非管理員。`
+                : ' 請先以管理員帳號登入。'}
+            </p>
+            <Link
+              href="/login"
+              className="inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+            >
+              {user ? '切換帳號' : '前往登入'}
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   // --- Render --------------------------------------------------------------
 
   return (
     <div className="mx-auto max-w-2xl">
-      <h1 className="mb-6 text-2xl font-bold text-gray-900">
+      <h1 className="mb-6 text-2xl font-bold text-foreground">
         &#9881;&#65039; 設定
       </h1>
 

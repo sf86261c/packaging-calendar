@@ -231,6 +231,8 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `021_orders_notes.sql` | orders 加 notes TEXT（保留 batch_info 中的非數字備註） |
 | `022_product_is_common.sql` | products 加 is_common BOOLEAN DEFAULT TRUE + 補入 6 個曲奇特殊組合（原味粉/原味藍/伯爵白/伯爵粉/可可白/可可藍）並標記為非常用 |
 | `023_copy_special_cookie_materials.sql` | 從原味白/可可粉/伯爵藍 的 product_material_usage 按「包裝顏色」複製配方給對應 6 個特殊組合 |
+| `024_app_users_auth.sql` | app_users + sign_up/sign_in RPC（pgcrypto bcrypt）+ seed admin/admin888 |
+| `025_activity_logs.sql` | activity_logs 表 + log_activity / cleanup_old_activity_logs RPC（30 天自動清理） |
 
 ## 檔案結構
 
@@ -414,6 +416,50 @@ ALTER TABLE stock_adjustments
 ```
 
 ## 變更紀錄
+
+### 2026-04-28 — 帳號系統 + 操作紀錄 + 設定頁 admin guard
+
+**需求**：
+1. 加帳號註冊/登入（不要 email 驗證）
+2. 左側新增操作紀錄頁，保存 30 天自動清理
+3. 紀錄所有帳號的寫入操作
+4. 設定頁僅 admin / admin888 可操作
+
+**設計**
+
+- **Migration 024**：自建 app_users（不用 Supabase Auth）+ pgcrypto bcrypt 密碼雜湊 + SECURITY DEFINER RPC `sign_up` / `sign_in`，預設 seed `admin / admin888` (is_admin=TRUE)。anon 不能直接 SELECT app_users，所有讀寫都走 RPC。
+- **Migration 025**：activity_logs 表 + RPC `log_activity(username, action, target, metadata)` + `cleanup_old_activity_logs()`（DELETE WHERE created_at < NOW() - INTERVAL '30 days'）。
+- **Vercel Cron**：新增 `/api/cleanup-activity` 路由 + cron 每日 01:30 呼叫清理 RPC（與 line-notify 錯開 30 分鐘）。
+- **Client-side auth**：用 localStorage 儲存 `{ id, username, is_admin }` + `useSyncExternalStore` 確保多元件即時更新；登入/登出/註冊都呼叫 RPC。安全層仍由 Supabase RLS 把關（anon 全開，本地登入只用於識別當前操作者）。
+- **登入/註冊頁** `/login`：單一頁面 toggle 切換 sign-in / sign-up，註冊後自動登入並寫入 `帳號.註冊` log。
+- **操作紀錄頁** `/activity`：列出最近 500 筆紀錄；mount 時順手呼叫 cleanup RPC（雙重保險）；支援按帳號/動作/目標篩選。
+- **AppShell**：加入「紀錄」nav 項目（所有人可見）；「設定」項目加 `adminOnly: true` flag，非 admin 不顯示（直接點 URL 也會被 settings 頁的 guard 擋）；底部顯示當前帳號 + 登出按鈕，未登入則顯示登入入口。
+- **設定頁 admin guard**：未登入或非 admin 顯示「無權限」卡片 + 跳轉 `/login` 連結。
+- **logActivity 覆蓋範圍**（首批）：訂單新增/編輯/刪除/列印切換/付款切換、試吃耗損散單新增/編輯/刪除、設定產品 CRUD/改名/啟停/常用切換、包裝/烙印 CRUD/啟停、登入/登出/註冊。
+
+**取捨**：
+- **不用 Supabase Auth**：用戶要求免 email 驗證，自建簡易帳密更直觀。
+- **localStorage 而非 cookie/JWT**：客戶端識別足夠（DB 安全已由 RLS 把關），免去 server session 維護。
+- **首批不覆蓋所有寫入操作**：庫存入庫、安全庫存編輯、包材 CRUD、分批/追加 等暫未加 log，等用戶反饋再補。
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| Migration 024 / 025 | `supabase/migrations/024_app_users_auth.sql` / `025_activity_logs.sql` |
+| Auth helpers (localStorage + RPC + hooks) | `src/lib/auth.ts`（新增） |
+| logActivity helper | `src/lib/activity.ts`（新增） |
+| 登入/註冊頁 | `src/app/login/page.tsx`（新增） |
+| 操作紀錄頁 | `src/app/activity/page.tsx`（新增） |
+| 清理 cron 路由 | `src/app/api/cleanup-activity/route.ts`（新增） |
+| Vercel cron 排程 | `vercel.json` |
+| AppShell（紀錄項目 / admin-only 設定 / 登入區塊 / 登出） | `src/components/app-shell.tsx` |
+| 設定頁 admin guard + 各 CRUD logActivity | `src/app/settings/page.tsx` |
+| 訂單 CRUD logActivity | `src/components/order-form-dialog.tsx`、`src/app/calendar/[date]/page.tsx` |
+
+**Migrations（待 Dashboard 執行）**
+- `024_app_users_auth.sql` — 未執行前所有 sign_in/sign_up 都會 alert RPC not found；無法以 admin 進設定頁
+- `025_activity_logs.sql` — 未執行前 logActivity 失敗（console.warn 不阻塞）；操作紀錄頁空白
 
 ### 2026-04-28 — 曲奇特殊組合包材配方複製
 
@@ -682,6 +728,10 @@ ALTER TABLE stock_adjustments
 1. **執行 Migration 022 + 023**（需依序）：
    - `022_product_is_common.sql`：products 加 `is_common`、補入 6 個特殊組合
    - `023_copy_special_cookie_materials.sql`：從原味白/伯爵藍/可可粉 複製包材配方到對應 6 個新組合（023 必須在 022 之後執行，否則新產品還不存在，配方複製會 0 rows）
+2. **執行 Migration 024 + 025**：
+   - `024_app_users_auth.sql`：建立 app_users 表 + sign_up/sign_in RPC + seed admin/admin888
+   - `025_activity_logs.sql`：建立 activity_logs 表 + log_activity / cleanup_old_activity_logs RPC
+   - 未執行前：登入/註冊 alert 錯誤；操作紀錄頁面空白；設定頁所有非管理員都無法存取
 
 ### 低優先
 
