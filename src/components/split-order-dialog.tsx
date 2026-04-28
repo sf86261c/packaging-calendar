@@ -378,7 +378,7 @@ export function SplitOrderDialog({
                           const value = row.items[p.id] || 0
                           return (
                             <div key={p.id} className="flex items-center gap-2">
-                              <span className="text-xs text-gray-600 flex-1 truncate">{p.name}</span>
+                              <span className="text-xs text-gray-600 flex-1 break-words">{p.name}</span>
                               <Input
                                 type="number"
                                 min={0}
@@ -418,6 +418,19 @@ export function SplitOrderDialog({
 
             <div className="space-y-3">
               {appends.map((row, idx) => {
+                // 「沒有」類別 + 已選某口味 → 其他口味隱藏（每筆追加只能一種口味）
+                const cakeSelectedId = !hasExistingCake
+                  ? allCakes.find((p) => (row.items[p.id] || 0) > 0)?.id
+                  : undefined
+                const tubeSelectedId = !hasExistingTube
+                  ? allTubes.find((p) => (row.items[p.id] || 0) > 0)?.id
+                  : undefined
+                const cakeListToShow = hasExistingCake
+                  ? existingCakes
+                  : (cakeSelectedId ? allCakes.filter((p) => p.id === cakeSelectedId) : allCakes)
+                const tubeListToShow = hasExistingTube
+                  ? existingTubes
+                  : (tubeSelectedId ? allTubes.filter((p) => p.id === tubeSelectedId) : allTubes)
                 const noCategoryAvailable =
                   allCakes.length === 0 && allTubes.length === 0
                   && !hasExistingSingleCake && allCookies.length === 0
@@ -454,9 +467,9 @@ export function SplitOrderDialog({
                           蜂蜜蛋糕{hasExistingCake ? '（限原口味，沿用原訂單包裝/烙印）' : '（請選擇新包裝/烙印）'}
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                          {(hasExistingCake ? existingCakes : allCakes).map((p) => (
+                          {cakeListToShow.map((p) => (
                             <div key={p.id} className="flex items-center gap-2">
-                              <span className="text-xs text-gray-600 flex-1 truncate">{p.name}</span>
+                              <span className="text-xs text-gray-600 flex-1 break-words">{p.name}</span>
                               <Input
                                 type="number"
                                 min={0}
@@ -514,9 +527,9 @@ export function SplitOrderDialog({
                           旋轉筒{hasExistingTube ? '（限原口味，沿用原訂單包裝）' : '（請選擇新包裝）'}
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                          {(hasExistingTube ? existingTubes : allTubes).map((p) => (
+                          {tubeListToShow.map((p) => (
                             <div key={p.id} className="flex items-center gap-2">
-                              <span className="text-xs text-gray-600 flex-1 truncate">{p.name}</span>
+                              <span className="text-xs text-gray-600 flex-1 break-words">{p.name}</span>
                               <Input
                                 type="number"
                                 min={0}
@@ -561,7 +574,7 @@ export function SplitOrderDialog({
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                           {existingSingleCakes.map((p) => (
                             <div key={p.id} className="flex items-center gap-2">
-                              <span className="text-xs text-gray-600 flex-1 truncate">{p.name}</span>
+                              <span className="text-xs text-gray-600 flex-1 break-words">{p.name}</span>
                               <Input
                                 type="number"
                                 min={0}
@@ -587,7 +600,7 @@ export function SplitOrderDialog({
                         <div className="grid grid-cols-2 gap-1.5">
                           {allCookies.map((p) => (
                             <div key={p.id} className="flex items-center gap-2">
-                              <span className="text-xs text-gray-600 flex-1 truncate">{p.name}</span>
+                              <span className="text-xs text-gray-600 flex-1 break-words">{p.name}</span>
                               <Input
                                 type="number"
                                 min={0}

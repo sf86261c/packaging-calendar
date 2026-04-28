@@ -426,6 +426,27 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-04-28 — 追加 dialog UI 細修（單口味隱藏 + 文字截斷）
+
+**修正**
+1. **「沒有」類別 + 選了一個口味 → 其他口味立即隱藏**
+   - 每筆追加只能一種蜂蜜蛋糕/旋轉筒口味（與「一種」規則一致）
+   - 在 row map 內 derive `cakeSelectedId / tubeSelectedId`，再用 `cakeListToShow / tubeListToShow` 切換 list
+   - 數量歸 0 後其他口味自動重新顯示
+
+2. **移除 `truncate` class，改用 `break-words`**
+   - 蜂蜜蛋糕長名稱（如「經典原味+伯爵紅茶」）原本被省略為「...」，無法分辨口味
+   - 統一替換 5 處 `text-xs text-gray-600 flex-1 truncate` → `text-xs text-gray-600 flex-1 break-words`
+   - 範圍含分批/追加各 section + 單入蛋糕 + 曲奇
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| 加 cakeSelectedId/tubeSelectedId/listToShow + truncate → break-words | `src/components/split-order-dialog.tsx` |
+
+---
+
 ### 2026-04-28 — 追加訂單品項規則細化（按「訂單群是否已有此類別」差異化）
 
 **需求 / 規則確認**
