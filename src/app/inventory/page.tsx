@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
+import { useCurrentUserClient } from '@/lib/auth'
 import { format, addDays } from 'date-fns'
 import {
   Loader2, Plus, Send, Pencil, Check, X, Package, AlertTriangle,
@@ -43,6 +44,8 @@ const leadDateStr = (days: number) => format(addDays(new Date(), days), 'yyyy-MM
 
 export default function InventoryPage() {
   const supabase = createClient()
+  const { user } = useCurrentUserClient()
+  const isAdmin = !!user?.is_admin
   const [products, setProducts] = useState<ProductStock[]>([])
   const [materials, setMaterials] = useState<MaterialStock[]>([])
   const [loading, setLoading] = useState(true)
@@ -177,11 +180,13 @@ export default function InventoryPage() {
   // ─── Inline edit handlers ──────────────────────
 
   const startEditSafety = (p: ProductStock) => {
+    if (!isAdmin) return
     setEditingSafetyId(p.id)
     setEditingSafetyValue(String(p.safety_stock))
   }
   const cancelEditSafety = () => { setEditingSafetyId(null); setEditingSafetyValue('') }
   const saveEditSafety = async () => {
+    if (!isAdmin) return
     if (!editingSafetyId) return
     const value = parseInt(editingSafetyValue, 10)
     if (Number.isNaN(value) || value < 0) { cancelEditSafety(); return }
@@ -193,11 +198,13 @@ export default function InventoryPage() {
   }
 
   const startEditLead = (p: ProductStock) => {
+    if (!isAdmin) return
     setEditingLeadId(p.id)
     setEditingLeadValue(String(p.lead_time_days))
   }
   const cancelEditLead = () => { setEditingLeadId(null); setEditingLeadValue('') }
   const saveEditLead = async () => {
+    if (!isAdmin) return
     if (!editingLeadId) return
     const value = parseInt(editingLeadValue, 10)
     if (Number.isNaN(value) || value < 0) { cancelEditLead(); return }
@@ -211,6 +218,7 @@ export default function InventoryPage() {
   // ─── Inbound handlers ──────────────────────────
 
   const handleProductInbound = async () => {
+    if (!isAdmin) return
     if (!pInboundProduct || !pInboundQty) return
     setSaving(true)
     await supabase.from('inventory').insert({
@@ -224,6 +232,7 @@ export default function InventoryPage() {
   }
 
   const handleMaterialInbound = async () => {
+    if (!isAdmin) return
     if (!mInboundMat || !mInboundQty) return
     setSaving(true)
     await supabase.from('packaging_material_inventory').insert({
@@ -237,6 +246,7 @@ export default function InventoryPage() {
   // ─── Material handlers ────────────────────────
 
   const handleAddMaterial = async () => {
+    if (!isAdmin) return
     if (!matName.trim()) return
     setSaving(true)
     await supabase.from('packaging_materials').insert({
@@ -250,6 +260,7 @@ export default function InventoryPage() {
   }
 
   const openMatEditDialog = (m: MaterialStock) => {
+    if (!isAdmin) return
     setMatEditId(m.id)
     setMatEditName(m.name)
     setMatEditUnit(m.unit)
@@ -259,6 +270,7 @@ export default function InventoryPage() {
   }
 
   const handleEditMaterial = async () => {
+    if (!isAdmin) return
     if (!matEditName.trim()) return
     setSaving(true)
     await supabase.from('packaging_materials').update({
@@ -271,6 +283,7 @@ export default function InventoryPage() {
   }
 
   const handleDeleteMaterial = async (id: string, name: string) => {
+    if (!isAdmin) return
     if (!confirm(`確定要刪除「${name}」？相關庫存記錄和用量對照也會一併刪除。`)) return
     await supabase.from('packaging_material_inventory').delete().eq('material_id', id)
     await supabase.from('product_material_usage').delete().eq('material_id', id)
@@ -279,6 +292,7 @@ export default function InventoryPage() {
   }
 
   const handleToggleMatActive = async (id: string, isActive: boolean) => {
+    if (!isAdmin) return
     await supabase.from('packaging_materials').update({ is_active: !isActive }).eq('id', id)
     fetchAll()
   }
@@ -286,6 +300,7 @@ export default function InventoryPage() {
   // ─── LINE notify ───────────────────────────────
 
   const handleLineNotify = async () => {
+    if (!isAdmin) return
     setSendingLine(true)
     try {
       const res = await fetch('/api/line-notify')
@@ -311,6 +326,7 @@ export default function InventoryPage() {
   const cookiesHidden = cookies.length > 0 && cookies.every(c => !c.show_in_inventory)
 
   const toggleCookiesVisible = async () => {
+    if (!isAdmin) return
     const newValue = cookiesHidden
     const ids = cookies.map(c => c.id)
     if (ids.length === 0) return
@@ -364,7 +380,7 @@ export default function InventoryPage() {
                     <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
-              ) : (
+              ) : isAdmin ? (
                 <button
                   onClick={() => startEditLead(p)}
                   className="rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] text-gray-600 hover:bg-blue-50 hover:text-blue-700"
@@ -372,6 +388,10 @@ export default function InventoryPage() {
                 >
                   D+{p.lead_time_days}
                 </button>
+              ) : (
+                <span className="rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] text-gray-600">
+                  D+{p.lead_time_days}
+                </span>
               )}
               {isLow && <Badge variant="destructive" className="text-xs">低庫存</Badge>}
             </div>
@@ -401,9 +421,11 @@ export default function InventoryPage() {
             ) : (
               <>
                 <span>{p.safety_stock.toLocaleString()}</span>
-                <button onClick={() => startEditSafety(p)} className="ml-1 text-gray-400 hover:text-blue-600" aria-label="編輯安全庫存">
-                  <Pencil className="h-3 w-3" />
-                </button>
+                {isAdmin && (
+                  <button onClick={() => startEditSafety(p)} className="ml-1 text-gray-400 hover:text-blue-600" aria-label="編輯安全庫存">
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -429,15 +451,19 @@ export default function InventoryPage() {
             <div className="flex items-center gap-1">
               <Badge variant="outline" className="text-[10px] text-gray-500">D+{m.lead_time_days ?? 7}</Badge>
               {isLow && <Badge variant="destructive" className="text-xs">低庫存</Badge>}
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-blue-600" onClick={() => openMatEditDialog(m)}>
-                <Pencil className="h-3 w-3" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-orange-600" onClick={() => handleToggleMatActive(m.id, m.is_active)} title="停用">
-                <Ban className="h-3 w-3" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-red-600" onClick={() => handleDeleteMaterial(m.id, m.name)} title="刪除">
-                <Trash2 className="h-3 w-3" />
-              </Button>
+              {isAdmin && (
+                <>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-blue-600" onClick={() => openMatEditDialog(m)}>
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-orange-600" onClick={() => handleToggleMatActive(m.id, m.is_active)} title="停用">
+                    <Ban className="h-3 w-3" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-red-600" onClick={() => handleDeleteMaterial(m.id, m.name)} title="刪除">
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </>
+              )}
             </div>
           </div>
           <div className={`mt-2 text-3xl font-bold ${isLow ? 'text-red-600' : ''}`}>
@@ -479,27 +505,29 @@ export default function InventoryPage() {
           )}
           <span className="text-xs text-gray-500">每項依各自到貨時間 D+N 計算未來庫存</span>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleLineNotify}
-            disabled={sendingLine || loading}
-            className="h-8 text-xs border-orange-300 text-orange-700 hover:bg-orange-50"
-          >
-            {sendingLine ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Send className="mr-1 h-3 w-3" />}
-            叫貨通知
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setProductInboundOpen(true)}>
-            <Plus className="mr-1 h-4 w-4" /> 產品入庫
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setMaterialInboundOpen(true)}>
-            <Package className="mr-1 h-4 w-4" /> 包材入庫
-          </Button>
-          <Button size="sm" onClick={() => setMatAddOpen(true)}>
-            <Plus className="mr-1 h-4 w-4" /> 新增包材
-          </Button>
-        </div>
+        {isAdmin && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleLineNotify}
+              disabled={sendingLine || loading}
+              className="h-8 text-xs border-orange-300 text-orange-700 hover:bg-orange-50"
+            >
+              {sendingLine ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Send className="mr-1 h-3 w-3" />}
+              叫貨通知
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setProductInboundOpen(true)}>
+              <Plus className="mr-1 h-4 w-4" /> 產品入庫
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setMaterialInboundOpen(true)}>
+              <Package className="mr-1 h-4 w-4" /> 包材入庫
+            </Button>
+            <Button size="sm" onClick={() => setMatAddOpen(true)}>
+              <Plus className="mr-1 h-4 w-4" /> 新增包材
+            </Button>
+          </div>
+        )}
       </div>
 
       {cakeBars.length > 0 && (
@@ -523,14 +551,16 @@ export default function InventoryPage() {
               曲奇
               {cookiesHidden && <span className="ml-2 text-xs font-normal text-gray-400">（已隱藏，不列入叫貨通知）</span>}
             </h2>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={toggleCookiesVisible}
-              className="h-7 text-xs"
-            >
-              {cookiesHidden ? <><Eye className="mr-1 h-3 w-3" /> 顯示</> : <><EyeOff className="mr-1 h-3 w-3" /> 隱藏</>}
-            </Button>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={toggleCookiesVisible}
+                className="h-7 text-xs"
+              >
+                {cookiesHidden ? <><Eye className="mr-1 h-3 w-3" /> 顯示</> : <><EyeOff className="mr-1 h-3 w-3" /> 隱藏</>}
+              </Button>
+            )}
           </div>
           {!cookiesHidden && (
             <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">{cookies.map(renderProductCard)}</div>
@@ -556,7 +586,7 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {inactiveMaterials.length > 0 && (
+      {isAdmin && inactiveMaterials.length > 0 && (
         <Card className="mt-4">
           <CardHeader><CardTitle className="text-sm text-gray-400">已停用包材</CardTitle></CardHeader>
           <CardContent>

@@ -426,6 +426,39 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-04-28 — 庫存頁 admin guard + LINE 推播 UID 更新
+
+**1. 庫存頁僅 admin 可編輯（其他人僅可查看）**
+
+- 加 `useCurrentUserClient` 取得 user，衍生 `isAdmin = !!user?.is_admin`
+- UI 對非 admin 隱藏編輯入口：
+  - 標題列右上「叫貨通知 / 產品入庫 / 包材入庫 / 新增包材」整組按鈕
+  - 產品卡片內 D+N badge 點擊（改顯示為靜態 span，視覺保留但不可點）
+  - 安全庫存 pencil 編輯按鈕
+  - 包材卡片內三個 icon（編輯 / 停用 / 刪除）
+  - 曲奇 section 標題旁的「隱藏 / 顯示」切換
+  - 已停用包材區塊（整段不渲染）
+- 寫入 handler 全部加 `if (!isAdmin) return` 守門，防止透過 dev tools 直接呼叫；handler 列表：`startEditSafety / saveEditSafety / startEditLead / saveEditLead / handleProductInbound / handleMaterialInbound / handleAddMaterial / openMatEditDialog / handleEditMaterial / handleDeleteMaterial / handleToggleMatActive / handleLineNotify / toggleCookiesVisible`
+- 不擋頁面載入：mounted 前 isAdmin 為 false，會看到 view-only 一瞬間，admin 登入完 UI 自動切換為可編輯
+- 安全層仍由 RLS 把關（anon 全開，client guard 只是 UX 層）
+
+**2. LINE 自動推播 UID 更新**
+
+- 新 UID：`U552a2551dfa5df627fb96623b9e750b9`
+- 已同步更新 `.env.local`（本地）+ Vercel Production env vars（透過 `vercel env rm/add` CLI）
+- 影響範圍：手動「叫貨通知」按鈕 + Vercel Cron 每日 09:00 AM 自動推播
+- 程式碼層 `/api/line-notify` 不變，UID 改動僅在環境變數
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| 庫存頁 admin guard（import / state / handler 守門 / UI 隱藏） | `src/app/inventory/page.tsx` |
+| LINE_TARGET_ID 本地值 | `.env.local`（不進 git） |
+| LINE_TARGET_ID 生產值 | Vercel Dashboard env vars（透過 vercel CLI 同步） |
+
+---
+
 ### 2026-04-28 — 帳號系統強化（session 過期、全域 guard、操作紀錄中文化、404 導向）
 
 承續同日「帳號系統 + 操作紀錄 + 設定頁 admin guard」初版，後續補上多項細節：
@@ -886,17 +919,6 @@ metadata key 全中文：`客戶 / 日期 / 原日期 / 付款狀態 / 品項 / 
 
 ## 未完成事項
 
-### 高優先 ⚠️
-
-1. **執行 Migration 022 + 023**（需依序）：
-   - `022_product_is_common.sql`：products 加 `is_common`、補入 6 個特殊組合
-   - `023_copy_special_cookie_materials.sql`：從原味白/伯爵藍/可可粉 複製包材配方到對應 6 個新組合（023 必須在 022 之後執行，否則新產品還不存在，配方複製會 0 rows）
-2. **執行 Migration 024 + 025 + 026**：
-   - `024_app_users_auth.sql`：建立 app_users 表 + sign_up/sign_in RPC + seed admin/admin888
-   - `025_activity_logs.sql`：建立 activity_logs 表 + log_activity / cleanup_old_activity_logs RPC
-   - `026_fix_auth_search_path.sql`：修正 RPC search_path（024 沒包含 extensions schema，導致註冊報錯 `gen_salt does not exist`）
-   - 未執行前：登入/註冊 alert 錯誤；操作紀錄頁面空白；設定頁所有非管理員都無法存取
-
 ### 低優先
 
 1. **自訂域名** — 可在 Vercel Dashboard > Domains 設定
@@ -909,6 +931,10 @@ metadata key 全中文：`客戶 / 日期 / 原日期 / 付款狀態 / 品項 / 
 - ✅ 散單/試吃/耗損 finished mode 補 tube_pkg 扣減（2026-04-22 程式碼修復，待 015 啟用 product 後生效）
 - ✅ Migration 015 + 016 + 017 已執行（2026-04-27 用戶回報完成）
 - ✅ Migration 018 + 019 已執行（2026-04-28 用戶回報完成 — 付款狀態欄位、per-product lead_time/可見性 全面啟用）
+- ✅ Migration 022 + 023 已執行（2026-04-28 — 曲奇 is_common 欄位 + 6 個特殊組合補入 + 包材配方複製）
+- ✅ Migration 024 + 025 + 026 已執行（2026-04-28 — app_users 認證 + activity_logs + pgcrypto search_path 修正）
+- ✅ 庫存頁 admin guard：僅 admin 可編輯，非 admin 僅可查看（2026-04-28）
+- ✅ LINE 自動推播 UID 更新為 `U552a2551dfa5df627fb96623b9e750b9`（2026-04-28，已同步 .env.local + Vercel production env）
 
 ## 環境資訊
 
