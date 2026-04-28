@@ -267,16 +267,37 @@ export function OrderFormDialog({
       // RPC：DELETE old + INSERT new 在 server 端為單一 transaction
       await replaceOrderInventory(supabase, orderId, invDeductions, matResult.deductions, formDate)
 
-      await logActivity(
-        editingOrder ? '訂單.編輯' : '訂單.新增',
-        `order:${orderId}`,
-        {
-          customer: orderData.customer_name,
-          date: orderData.order_date,
-          item_count: itemEntries.length,
-          paid: orderData.paid,
-        },
-      )
+      // 細化 action：新增 / 改日期 / 改數量 / 改日期+改數量 / 編輯訂單
+      let activityAction = '新增訂單'
+      const meta: Record<string, unknown> = {
+        客戶: orderData.customer_name,
+        日期: orderData.order_date,
+        付款: orderData.paid ? '已付款' : '未付款',
+      }
+      if (editingOrder) {
+        const dateChanged = editingOrder.order_date !== formDate
+        const oldItems: Record<string, number> = {}
+        for (const i of editingOrder.items) oldItems[i.productId] = i.quantity
+        const oldKeys = new Set(Object.keys(oldItems).filter(k => oldItems[k] > 0))
+        const newKeys = new Set(Object.keys(formItems).filter(k => formItems[k] > 0))
+        let itemsChanged = oldKeys.size !== newKeys.size
+        if (!itemsChanged) {
+          for (const k of oldKeys) {
+            if (!newKeys.has(k) || oldItems[k] !== formItems[k]) {
+              itemsChanged = true
+              break
+            }
+          }
+        }
+        if (dateChanged && itemsChanged) activityAction = '改日期+改數量'
+        else if (dateChanged) activityAction = '改日期'
+        else if (itemsChanged) activityAction = '改數量'
+        else activityAction = '編輯訂單'
+        if (dateChanged) meta['原日期'] = editingOrder.order_date
+      }
+      const totalQty = itemEntries.reduce((s, [, q]) => s + q, 0)
+      meta['品項總數'] = totalQty
+      await logActivity(activityAction, `order:${orderId}`, meta)
 
       if (onWarning) {
         const sections: string[] = []

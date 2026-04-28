@@ -28,10 +28,10 @@ export default function LoginPage() {
     try {
       if (mode === 'signup') {
         const user = await signUp(username.trim(), password)
-        await logActivity('帳號.註冊', `user:${user.id}`, { username: user.username })
+        await logActivity('註冊帳號', `user:${user.id}`, { 帳號: user.username })
       } else {
         const user = await signIn(username.trim(), password)
-        await logActivity('帳號.登入', `user:${user.id}`, { username: user.username })
+        await logActivity('登入', `user:${user.id}`, { 帳號: user.username })
       }
       router.push('/calendar')
     } catch (err) {

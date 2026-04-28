@@ -479,9 +479,9 @@ export default function DayOrderPage() {
     const target = orders.find((o) => o.id === orderId)
     try {
       await deleteOrderWithInventory(supabase, orderId)
-      await logActivity('訂單.刪除', `order:${orderId}`, {
-        customer: target?.customer_name,
-        date: dateStr,
+      await logActivity('刪除訂單', `order:${orderId}`, {
+        客戶: target?.customer_name ?? '',
+        日期: dateStr,
       })
       fetchOrders()
     } catch (err) {
@@ -493,8 +493,9 @@ export default function DayOrderPage() {
     await supabase.from('orders').update({ printed }).eq('id', orderId)
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, printed } : o))
     const target = orders.find((o) => o.id === orderId)
-    await logActivity(printed ? '訂單.列印' : '訂單.取消列印', `order:${orderId}`, {
-      customer: target?.customer_name,
+    await logActivity(printed ? '列印訂單' : '取消列印', `order:${orderId}`, {
+      客戶: target?.customer_name ?? '',
+      日期: dateStr,
     })
   }
 
@@ -502,8 +503,9 @@ export default function DayOrderPage() {
     await supabase.from('orders').update({ paid }).eq('id', orderId)
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, paid } : o))
     const target = orders.find((o) => o.id === orderId)
-    await logActivity(paid ? '訂單.標記已付款' : '訂單.標記未付款', `order:${orderId}`, {
-      customer: target?.customer_name,
+    await logActivity(paid ? '標記已付款' : '標記未付款', `order:${orderId}`, {
+      客戶: target?.customer_name ?? '',
+      日期: dateStr,
     })
   }
 
@@ -651,7 +653,26 @@ export default function DayOrderPage() {
       }
       showInventoryWarnings(allMissingCombos, [...new Set(allMissingTubePkg)])
 
-      // 6. 關閉 dialogs + reset + 刷新
+      // 6. 寫操作紀錄（分批 / 追加 分別 log）
+      const customer = formName.trim() || '未命名'
+      if (splits.length > 0) {
+        await logActivity('分批訂單', `order:${editingOrderId}`, {
+          客戶: customer,
+          來源日期: formDate,
+          分批數: splits.length,
+          分批日期: splits.map((s) => s.date).join(', '),
+        })
+      }
+      if (appends.length > 0) {
+        await logActivity('追加訂單', `order:${editingOrderId}`, {
+          客戶: customer,
+          來源日期: formDate,
+          追加數: appends.length,
+          追加日期: appends.map((a) => a.date).join(', '),
+        })
+      }
+
+      // 7. 關閉 dialogs + reset + 刷新
       setSplitDialogOpen(false)
       setDialogOpen(false)
       resetForm()
@@ -760,12 +781,16 @@ export default function DayOrderPage() {
       // RPC：reverse + apply 為 atomic
       await replaceAdjustmentInventory(supabase, adjustmentId, totalIngredient, totalMaterial, dateStr)
 
+      const typeLabel =
+        value.adjustmentType === 'sample' ? '試吃' :
+        value.adjustmentType === 'waste' ? '耗損' : '散單'
       await logActivity(
-        editingAdjustment ? '試吃耗損散單.編輯' : '試吃耗損散單.新增',
+        editingAdjustment ? `編輯${typeLabel}紀錄` : `新增${typeLabel}紀錄`,
         `adjustment:${adjustmentId}`,
         {
-          type: value.adjustmentType,
-          item_count: value.items.length,
+          類型: typeLabel,
+          日期: dateStr,
+          品項數: value.items.length,
         },
       )
 
@@ -780,7 +805,7 @@ export default function DayOrderPage() {
     if (!confirm('確定刪除此筆試吃/耗損？相關庫存扣減會一併回沖。')) return
     try {
       await deleteAdjustmentWithInventory(supabase, id)
-      await logActivity('試吃耗損散單.刪除', `adjustment:${id}`)
+      await logActivity('刪除試吃/耗損/散單紀錄', `adjustment:${id}`, { 日期: dateStr })
       fetchAdjustments()
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err))

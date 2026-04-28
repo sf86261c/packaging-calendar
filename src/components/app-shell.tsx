@@ -50,18 +50,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (!expiresAt) return
     const remaining = expiresAt - Date.now()
     if (remaining <= 0) {
-      logActivity('帳號.自動登出', `user:${user.id}`, {
-        username: user.username,
-        reason: 'session_expired',
+      logActivity('自動登出', `user:${user.id}`, {
+        帳號: user.username,
+        原因: 'Session 10 小時到期',
       })
       signOut()
       router.replace('/login')
       return
     }
     const timer = setTimeout(() => {
-      logActivity('帳號.自動登出', `user:${user.id}`, {
-        username: user.username,
-        reason: 'session_expired',
+      logActivity('自動登出', `user:${user.id}`, {
+        帳號: user.username,
+        原因: 'Session 10 小時到期',
       })
       signOut()
       router.replace('/login')
@@ -86,7 +86,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const visibleNav = navItems.filter((item) => !item.adminOnly || user.is_admin)
 
   const handleSignOut = async () => {
-    await logActivity('帳號.登出', `user:${user.id}`, { username: user.username })
+    await logActivity('登出', `user:${user.id}`, { 帳號: user.username })
     signOut()
     router.replace('/login')
   }

@@ -339,7 +339,7 @@ export default function SettingsPage() {
       }
     }
 
-    await logActivity('設定.產品.編輯', `product:${editingProductId}`, { name: trimmed })
+    await logActivity('編輯產品配方', `product:${editingProductId}`, { 產品: trimmed })
 
     resetProductForm()
     setProductDialogOpen(false)
@@ -413,9 +413,9 @@ export default function SettingsPage() {
       }
     }
 
-    await logActivity('設定.產品.新增', `product:${newProductId}`, {
-      category: newProductCategory,
-      name: trimmed,
+    await logActivity('新增產品', `product:${newProductId}`, {
+      類別: newProductCategory,
+      產品: trimmed,
     })
 
     resetProductForm()
@@ -427,23 +427,26 @@ export default function SettingsPage() {
 
   const updateProductName = async (id: string, name: string) => {
     await supabase.from('products').update({ name }).eq('id', id)
-    await logActivity('設定.產品.改名', `product:${id}`, { name })
+    await logActivity('修改產品名稱', `product:${id}`, { 新名稱: name })
     fetchProducts()
   }
 
   const toggleProductActive = async (id: string, currentActive: boolean) => {
+    const target = products.find((p) => p.id === id)
     await supabase
       .from('products')
       .update({ is_active: !currentActive })
       .eq('id', id)
     await logActivity(
-      currentActive ? '設定.產品.停用' : '設定.產品.啟用',
+      currentActive ? '停用產品' : '啟用產品',
       `product:${id}`,
+      { 產品: target?.name ?? '' },
     )
     fetchProducts()
   }
 
   const toggleProductCommon = async (id: string, currentCommon: boolean) => {
+    const target = products.find((p) => p.id === id)
     const { error } = await supabase
       .from('products')
       .update({ is_common: !currentCommon })
@@ -453,8 +456,9 @@ export default function SettingsPage() {
       return
     }
     await logActivity(
-      currentCommon ? '設定.產品.改為特殊組合' : '設定.產品.改為常用組合',
+      currentCommon ? '改為特殊曲奇' : '改為常用曲奇',
       `product:${id}`,
+      { 產品: target?.name ?? '' },
     )
     fetchProducts()
   }
@@ -530,7 +534,7 @@ export default function SettingsPage() {
       alert(`新增失敗：${error.message}`)
       return
     }
-    await logActivity('設定.包裝.新增', null, { name: trimmed, category: newPackagingCategory })
+    await logActivity('新增包裝款式', null, { 名稱: trimmed, 類別: newPackagingCategory })
 
     setNewPackagingName('')
     setNewPackagingColor('#000000')
@@ -544,18 +548,23 @@ export default function SettingsPage() {
     fields: Partial<Pick<PackagingStyle, 'name' | 'color_code'>>
   ) => {
     await supabase.from('packaging_styles').update(fields).eq('id', id)
-    await logActivity('設定.包裝.編輯', `packaging:${id}`, fields as Record<string, unknown>)
+    const meta: Record<string, unknown> = {}
+    if (fields.name) meta['新名稱'] = fields.name
+    if (fields.color_code) meta['新色碼'] = fields.color_code
+    await logActivity('編輯包裝款式', `packaging:${id}`, meta)
     fetchPackagingStyles()
   }
 
   const togglePackagingActive = async (id: string, currentActive: boolean) => {
+    const target = packagingStyles.find((p) => p.id === id)
     await supabase
       .from('packaging_styles')
       .update({ is_active: !currentActive })
       .eq('id', id)
     await logActivity(
-      currentActive ? '設定.包裝.停用' : '設定.包裝.啟用',
+      currentActive ? '停用包裝款式' : '啟用包裝款式',
       `packaging:${id}`,
+      { 名稱: target?.name ?? '' },
     )
     fetchPackagingStyles()
   }
@@ -573,7 +582,7 @@ export default function SettingsPage() {
       alert(`新增失敗：${error.message}`)
       return
     }
-    await logActivity('設定.烙印.新增', null, { name: trimmed, category: newBrandingCategory })
+    await logActivity('新增烙印款式', null, { 名稱: trimmed, 類別: newBrandingCategory })
 
     setNewBrandingName('')
     setNewBrandingCategory('')
@@ -583,18 +592,20 @@ export default function SettingsPage() {
 
   const updateBrandingName = async (id: string, name: string) => {
     await supabase.from('branding_styles').update({ name }).eq('id', id)
-    await logActivity('設定.烙印.改名', `branding:${id}`, { name })
+    await logActivity('修改烙印款式名稱', `branding:${id}`, { 新名稱: name })
     fetchBrandingStyles()
   }
 
   const toggleBrandingActive = async (id: string, currentActive: boolean) => {
+    const target = brandingStyles.find((b) => b.id === id)
     await supabase
       .from('branding_styles')
       .update({ is_active: !currentActive })
       .eq('id', id)
     await logActivity(
-      currentActive ? '設定.烙印.停用' : '設定.烙印.啟用',
+      currentActive ? '停用烙印款式' : '啟用烙印款式',
       `branding:${id}`,
+      { 名稱: target?.name ?? '' },
     )
     fetchBrandingStyles()
   }
