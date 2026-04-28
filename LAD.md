@@ -426,53 +426,59 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
-### 2026-04-28 — 追加訂單品項規則細化（按類別差異化）
+### 2026-04-28 — 追加訂單品項規則細化（按「訂單群是否已有此類別」差異化）
 
-**需求**：原「追加」只能選該客戶歷史品項，太過嚴格。要支援不同類別不同規則：
-- 蜂蜜蛋糕：原訂單已有口味才能追加（沿用包裝/烙印）
-- 旋轉筒：原訂單已有 → 限原口味；原訂單沒有 → 可加新口味，但每筆只能選一種 + 包裝
-- 單入蛋糕：原訂單已有口味才能追加（沿用包裝/烙印）
-- 曲奇：原訂單有 → 限原組合；原訂單沒有 → 任意多選
+**需求 / 規則確認**
+- 每位客戶的訂單群（同 batch_group_id 的所有訂單）只能同時有：**一種蜂蜜蛋糕、一種旋轉筒、多種曲奇**
+- 「一種」= 一張訂單共用一個包裝/烙印（口味本身仍可多種，但要走分批/追加流程）
+- 追加邏輯：
+  - 原訂單群**已有**蜂蜜蛋糕 → 限原口味+原包裝+原烙印的數量追加
+  - 原訂單群**已有**旋轉筒 → 限原口味+原包裝的數量追加
+  - 原訂單群**沒有**蜂蜜蛋糕 → 顯示全部口味 + 包裝/烙印下拉讓使用者選新規格
+  - 原訂單群**沒有**旋轉筒 → 顯示全部口味 + 包裝下拉
+  - 單入蛋糕：保守處理 — 已有 → 限原口味；沒有 → 不開放（per-item packaging 複雜度高）
+  - 曲奇：永遠任意多選（無包裝/烙印）
 
 **設計**
 
-1. **SplitOrderDialog 追加 section 重寫**
+1. **SplitOrderDialog 追加 section 完整重寫**
    - 移除舊的「該客戶歷史品項清單」單一 list 與單一 grid 輸入
-   - 改為按類別分四個 sections（cake / tube / single_cake / cookie），每個 section 規則不同
-   - 旋轉筒「選一種其他反灰」：當該追加 row 已有某口味數量 > 0，其他口味 input `disabled` 且文字 `text-gray-300`
-   - 旋轉筒新口味追加時顯示包裝下拉（從 `tubePackagingStyles` 帶入）
+   - 改為按類別分四個 sections（cake / tube / single_cake / cookie）
+   - 每個 section 依 `hasExistingXxx` 切換顯示：
+     - 已有 → 顯示 `existingXxx` 口味（限原口味），UI 提示「沿用原訂單包裝/烙印」
+     - 沒有 → 顯示 `allXxx` 口味 + 包裝/烙印下拉（cake 兩個下拉、tube 一個下拉）
 
 2. **AppendInput 介面擴充**
-   - 加 `tubePackagingId?: string | null` — effective 旋轉筒包裝（confirm 時根據規則計算填入）
-   - 規則：原訂單有旋轉筒 → 沿用 `originalTubePackagingId`；沒有 → 用追加 dialog 中選的；無旋轉筒品項 → null
+   - 加 `cakePackagingId?: string | null`、`cakeBrandingId?: string | null`、`tubePackagingId?: string | null`
+   - 都是 effective 值：confirm 時根據 `hasExistingXxx` 規則決定沿用 originalXxx 還是用 row 中選的 newXxx
+   - 該 row 沒有對應品項時為 null
 
 3. **Validation**
-   - 原訂單沒有旋轉筒 + 該 row 多於一個口味 → alert
-   - 原訂單沒有旋轉筒 + 該 row 有口味 + 沒選包裝 → alert
-   - 蜂蜜蛋糕/單入蛋糕：非原訂單品項 → alert（UI 已限制，雙保險）
-   - 原訂單已有旋轉筒 + 非原口味 → alert
+   - 原訂單沒有 cake/tube + 該 row 有對應品項 + 沒選新包裝/烙印 → alert
+   - 已有 cake/tube + 該 row 含非原口味 → alert（UI 已限制，雙保險）
+   - 單入蛋糕：非原訂單品項 → alert
 
-4. **handleSplitConfirm: tube_packaging_id override**
-   - `buildOrderHeader(date, tubePackagingOverride?)` 加可選參數
-   - splits 不傳（沿用 `formTubePackaging`）
-   - appends 傳 `a.tubePackagingId`（SplitOrderDialog confirm 時已計算為 effective 值）
-   - inventory 計算迴圈也按 override 計算扣減：split 用 `formTubePackaging`、append 用 override
+4. **handleSplitConfirm: 多欄位 override**
+   - `buildOrderHeader(date, overrides?: { cakePackagingId?, cakeBrandingId?, tubePackagingId? })` 用可選 overrides 物件
+   - splits 不傳（沿用 form 全欄位）
+   - appends 傳 `{ cakePackagingId, cakeBrandingId, tubePackagingId }`（SplitOrderDialog confirm 時已計算為 effective 值）
+   - inventory 計算迴圈同樣按 override 計算扣減：split 用 form 欄位、append 用 override（避免錯扣 cake/tube 包材）
 
 **取捨**
-- 沒在 `[date]/page.tsx` 重複 `hasExistingTube` 判斷：把判斷與 effective `tube_packaging_id` 計算都放在 SplitOrderDialog confirm 階段，page.tsx 只用結果
-- `single_cake` 與 `cake` 的「原口味」限制由 UI（只渲染 `existingXxx`）+ confirm validation 雙保險
-- 曲奇沒有包裝/烙印，單純根據 `hasExistingCookie` 切換顯示範圍
+- effective 值計算放在 SplitOrderDialog 內部，`[date]/page.tsx` 只消費結果（不重複判斷邏輯）
+- `single_cake` 暫不開放新規格（per-item packaging 對映複雜，user 也未明確要求）
+- 曲奇沒有包裝/烙印，簡化為任意多選（不分 existing/non-existing）
 
 **新增的 SplitOrderDialog props**
-- `tubePackagingStyles: { id: string; name: string }[]` — 旋轉筒包裝下拉選項
-- `originalTubePackagingId?: string | null` — 原訂單的 `tube_packaging_id`（繼承用）
+- `cakePackagingStyles / cakeBrandingStyles / tubePackagingStyles: { id; name }[]` — 各類別的下拉選項
+- `originalCakePackagingId / originalCakeBrandingId / originalTubePackagingId?: string | null` — 原訂單已有的規格（繼承用）
 
 **變更檔案**
 
 | 變更 | 檔案 |
 |---|---|
-| 追加 section 完整重寫 + 新 derived consts + validation + AppendInput 擴充 | `src/components/split-order-dialog.tsx` |
-| SplitOrderDialog 呼叫處加新 props + handleSplitConfirm 加 tube override + inventory 計算用 override | `src/app/calendar/[date]/page.tsx` |
+| SplitOrderDialog 全文重寫追加 section + AppendInput 擴充 cake/tube override + validation | `src/components/split-order-dialog.tsx` |
+| SplitOrderDialog 呼叫處加 6 個新 props + buildOrderHeader 接 overrides 物件 + inventory 用 cake/tube override 計算 | `src/app/calendar/[date]/page.tsx` |
 
 ---
 

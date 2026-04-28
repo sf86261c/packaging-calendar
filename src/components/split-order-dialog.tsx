@@ -20,7 +20,9 @@ export interface SplitInput {
 export interface AppendInput {
   date: string
   items: Record<string, number>
-  // effective tube_packaging_id：原訂單已有旋轉筒則沿用、否則為使用者在追加 dialog 選的新包裝；無旋轉筒品項時為 null
+  // 各類別 effective 包裝/烙印：原訂單已有則沿用 originalXxx；沒有則用追加 dialog 中選的；無該類別品項時為 null
+  cakePackagingId?: string | null
+  cakeBrandingId?: string | null
   tubePackagingId?: string | null
 }
 
@@ -39,7 +41,20 @@ interface AppendRow {
   rowId: string
   date: string
   items: Record<string, number>
-  newTubePackagingId: string  // 使用者選的旋轉筒包裝（僅原訂單沒有旋轉筒時用）
+  // 使用者在 dialog 中選的新規格（僅原訂單沒有該類別時用）
+  newCakePackagingId: string
+  newCakeBrandingId: string
+  newTubePackagingId: string
+}
+
+interface PackagingStyleLite {
+  id: string
+  name: string
+}
+
+interface BrandingStyleLite {
+  id: string
+  name: string
 }
 
 interface Props {
@@ -47,9 +62,16 @@ interface Props {
   onOpenChange: (open: boolean) => void
   originalDate: string
   poolItems: Record<string, number>
+  // 該客戶可追加的品項清單（原訂單 + 兄弟批次品項，僅 single_cake 用此限制原口味）
   appendableProductIds: string[]
-  tubePackagingStyles: { id: string; name: string }[]
-  originalTubePackagingId?: string | null  // 原訂單的旋轉筒包裝（用於繼承到追加訂單）
+  // 各類別包裝/烙印選項（原訂單沒有該類別時讓使用者選）
+  cakePackagingStyles: PackagingStyleLite[]
+  cakeBrandingStyles: BrandingStyleLite[]
+  tubePackagingStyles: PackagingStyleLite[]
+  // 原訂單已有的包裝/烙印（已有時沿用）
+  originalCakePackagingId?: string | null
+  originalCakeBrandingId?: string | null
+  originalTubePackagingId?: string | null
   products: Product[]
   onConfirm: (result: SplitOrAppendResult) => Promise<void>
 }
@@ -64,12 +86,16 @@ const newAppendRow = (defaultDate: string): AppendRow => ({
   rowId: Math.random().toString(36).slice(2),
   date: defaultDate,
   items: {},
+  newCakePackagingId: '',
+  newCakeBrandingId: '',
   newTubePackagingId: '',
 })
 
 export function SplitOrderDialog({
   open, onOpenChange, originalDate, poolItems, appendableProductIds,
-  tubePackagingStyles, originalTubePackagingId, products, onConfirm,
+  cakePackagingStyles, cakeBrandingStyles, tubePackagingStyles,
+  originalCakePackagingId, originalCakeBrandingId, originalTubePackagingId,
+  products, onConfirm,
 }: Props) {
   const [splits, setSplits] = useState<SplitRow[]>([newRow(originalDate)])
   const [appends, setAppends] = useState<AppendRow[]>([])
@@ -102,6 +128,12 @@ export function SplitOrderDialog({
   // ── 追加：分類各品項規則 ─────────────────────────
   const appendableSet = useMemo(() => new Set(appendableProductIds), [appendableProductIds])
 
+  const allCakes = useMemo(
+    () => products
+      .filter((p) => p.category === 'cake' && p.is_active)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [products],
+  )
   const allTubes = useMemo(
     () => products
       .filter((p) => p.category === 'tube' && p.is_active)
@@ -116,10 +148,8 @@ export function SplitOrderDialog({
   )
 
   const existingCakes = useMemo(
-    () => products
-      .filter((p) => p.category === 'cake' && p.is_active && appendableSet.has(p.id))
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
-    [products, appendableSet],
+    () => allCakes.filter((p) => appendableSet.has(p.id)),
+    [allCakes, appendableSet],
   )
   const existingTubes = useMemo(
     () => allTubes.filter((p) => appendableSet.has(p.id)),
@@ -131,16 +161,14 @@ export function SplitOrderDialog({
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
     [products, appendableSet],
   )
-  const existingCookies = useMemo(
-    () => allCookies.filter((p) => appendableSet.has(p.id)),
-    [allCookies, appendableSet],
-  )
 
+  // 「原訂單群已有某類別」= 該類別至少有一個 product 在 appendableSet 中
   const hasExistingCake = existingCakes.length > 0
   const hasExistingTube = existingTubes.length > 0
   const hasExistingSingleCake = existingSingleCakes.length > 0
-  const hasExistingCookie = existingCookies.length > 0
 
+  const cakePkgName = (id: string) => cakePackagingStyles.find((p) => p.id === id)?.name ?? ''
+  const cakeBrandName = (id: string) => cakeBrandingStyles.find((b) => b.id === id)?.name ?? ''
   const tubePkgName = (id: string) => tubePackagingStyles.find((p) => p.id === id)?.name ?? ''
 
   // ── Split row helpers ────────────────────────────
@@ -163,7 +191,10 @@ export function SplitOrderDialog({
     setSplits((prev) => (prev.length === 1 ? prev : prev.filter((r) => r.rowId !== rowId)))
 
   // ── Append row helpers ───────────────────────────
-  const updateAppendRow = (rowId: string, patch: Partial<Pick<AppendRow, 'date' | 'newTubePackagingId'>>) =>
+  const updateAppendRow = (
+    rowId: string,
+    patch: Partial<Pick<AppendRow, 'date' | 'newCakePackagingId' | 'newCakeBrandingId' | 'newTubePackagingId'>>,
+  ) =>
     setAppends((prev) => prev.map((r) => (r.rowId === rowId ? { ...r, ...patch } : r)))
 
   const updateAppendItem = (rowId: string, productId: string, qty: number) =>
@@ -190,16 +221,18 @@ export function SplitOrderDialog({
     const cleanedAppends: AppendInput[] = appends
       .map((a) => {
         const items = { ...a.items }
-        const tubeItemIds = Object.keys(items).filter(
-          (pid) => allTubes.some((t) => t.id === pid) && (items[pid] || 0) > 0,
-        )
-        let tubePackagingId: string | null = null
-        if (tubeItemIds.length > 0) {
-          tubePackagingId = hasExistingTube
-            ? (originalTubePackagingId || null)
-            : (a.newTubePackagingId || null)
-        }
-        return { date: a.date, items, tubePackagingId }
+        const hasCakeItem = allCakes.some((p) => (items[p.id] || 0) > 0)
+        const hasTubeItem = allTubes.some((p) => (items[p.id] || 0) > 0)
+        const cakePackagingId = hasCakeItem
+          ? (hasExistingCake ? (originalCakePackagingId || null) : (a.newCakePackagingId || null))
+          : null
+        const cakeBrandingId = hasCakeItem
+          ? (hasExistingCake ? (originalCakeBrandingId || null) : (a.newCakeBrandingId || null))
+          : null
+        const tubePackagingId = hasTubeItem
+          ? (hasExistingTube ? (originalTubePackagingId || null) : (a.newTubePackagingId || null))
+          : null
+        return { date: a.date, items, cakePackagingId, cakeBrandingId, tubePackagingId }
       })
       .filter((a) => a.date && Object.values(a.items).some((q) => q > 0))
 
@@ -219,32 +252,43 @@ export function SplitOrderDialog({
 
     // 追加品項規則檢查
     for (const a of cleanedAppends) {
-      const tubeItemIds = Object.keys(a.items).filter(
-        (pid) => allTubes.some((t) => t.id === pid) && (a.items[pid] || 0) > 0,
-      )
-      // 原訂單沒有旋轉筒：每筆追加只能選一種口味、且必須選包裝
-      if (!hasExistingTube) {
-        if (tubeItemIds.length > 1) {
-          alert('原訂單沒有旋轉筒，每筆追加只能選一種旋轉筒口味')
+      const hasCakeItem = allCakes.some((p) => (a.items[p.id] || 0) > 0)
+      const hasTubeItem = allTubes.some((p) => (a.items[p.id] || 0) > 0)
+
+      // 原訂單沒有蜂蜜蛋糕但該 row 有蜂蜜蛋糕 → 必須選包裝 + 烙印
+      if (hasCakeItem && !hasExistingCake) {
+        if (!a.cakePackagingId) {
+          alert('追加新蜂蜜蛋糕時必須選擇包裝款式')
           return
         }
-        if (tubeItemIds.length > 0 && !a.tubePackagingId) {
-          alert('追加新口味旋轉筒時必須選擇包裝款式')
+        if (!a.cakeBrandingId) {
+          alert('追加新蜂蜜蛋糕時必須選擇烙印款式')
           return
         }
       }
-      // 各品項類別合法性：cake/single_cake 僅可追加原口味
+      // 原訂單沒有旋轉筒但該 row 有旋轉筒 → 必須選包裝
+      if (hasTubeItem && !hasExistingTube) {
+        if (!a.tubePackagingId) {
+          alert('追加新旋轉筒時必須選擇包裝款式')
+          return
+        }
+      }
+      // 已有的類別只能追加原口味（雙保險，UI 上已限制）
       for (const pid of Object.keys(a.items)) {
         if ((a.items[pid] || 0) <= 0) continue
         const product = products.find((p) => p.id === pid)
         if (!product) continue
         const isExistingItem = appendableSet.has(pid)
-        if ((product.category === 'cake' || product.category === 'single_cake') && !isExistingItem) {
-          alert(`「${product.name}」無法追加：蜂蜜蛋糕/單入蛋糕僅可追加原訂單已有口味`)
+        if (product.category === 'cake' && hasExistingCake && !isExistingItem) {
+          alert(`「${product.name}」無法追加：原訂單已有蜂蜜蛋糕，僅可追加原口味的數量`)
           return
         }
         if (product.category === 'tube' && hasExistingTube && !isExistingItem) {
-          alert(`「${product.name}」無法追加：原訂單已有旋轉筒，只可追加原口味`)
+          alert(`「${product.name}」無法追加：原訂單已有旋轉筒，僅可追加原口味的數量`)
+          return
+        }
+        if (product.category === 'single_cake' && !isExistingItem) {
+          alert(`「${product.name}」無法追加：單入蛋糕僅可追加原訂單已有口味`)
           return
         }
       }
@@ -366,21 +410,17 @@ export function SplitOrderDialog({
               追加 — 在新日期增加訂單
             </div>
             <p className="text-xs text-gray-500">
-              建立新日期訂單(不從原訂單扣減)：原訂單已有品項可追加數量(沿用包裝/烙印)；
-              旋轉筒可追加新口味(每筆只能選一種 + 包裝)；曲奇可任意多選。
+              建立新日期訂單(不從原訂單扣減)。每張訂單只能一種蜂蜜蛋糕、一種旋轉筒（口味可多種，共用包裝/烙印），曲奇可任意多選。
+              {hasExistingCake || hasExistingTube
+                ? ' 已有的類別自動沿用原訂單包裝/烙印。'
+                : ''}
             </p>
 
             <div className="space-y-3">
               {appends.map((row, idx) => {
-                const tubeFilledIds = allTubes
-                  .filter((p) => (row.items[p.id] || 0) > 0)
-                  .map((p) => p.id)
-                const tubeAnyFilled = tubeFilledIds.length > 0
-                const showCookies = hasExistingCookie ? existingCookies : allCookies
                 const noCategoryAvailable =
-                  !hasExistingCake && !hasExistingSingleCake
-                  && existingTubes.length === 0 && allTubes.length === 0
-                  && showCookies.length === 0
+                  allCakes.length === 0 && allTubes.length === 0
+                  && !hasExistingSingleCake && allCookies.length === 0
 
                 return (
                   <div key={row.rowId} className="rounded-lg border p-3 space-y-3">
@@ -407,14 +447,14 @@ export function SplitOrderDialog({
                       </Button>
                     </div>
 
-                    {/* 蜂蜜蛋糕：僅原訂單已有口味才開放 */}
-                    {hasExistingCake && (
+                    {/* 蜂蜜蛋糕：已有→限原口味，沿用包裝/烙印；沒有→顯示全部口味 + 包裝/烙印下拉 */}
+                    {((hasExistingCake && existingCakes.length > 0) || (!hasExistingCake && allCakes.length > 0)) && (
                       <div className="rounded-md bg-amber-50/40 p-2 space-y-1.5">
                         <div className="text-xs font-semibold text-gray-700">
-                          蜂蜜蛋糕（沿用原訂單包裝/烙印）
+                          蜂蜜蛋糕{hasExistingCake ? '（限原口味，沿用原訂單包裝/烙印）' : '（請選擇新包裝/烙印）'}
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                          {existingCakes.map((p) => (
+                          {(hasExistingCake ? existingCakes : allCakes).map((p) => (
                             <div key={p.id} className="flex items-center gap-2">
                               <span className="text-xs text-gray-600 flex-1 truncate">{p.name}</span>
                               <Input
@@ -430,17 +470,51 @@ export function SplitOrderDialog({
                             </div>
                           ))}
                         </div>
+                        {!hasExistingCake && allCakes.some((p) => (row.items[p.id] || 0) > 0) && (
+                          <div className="grid grid-cols-2 gap-2 pt-1">
+                            <Select
+                              value={row.newCakeBrandingId || undefined}
+                              onValueChange={(v) => v && updateAppendRow(row.rowId, { newCakeBrandingId: v })}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="烙印款式">
+                                  {row.newCakeBrandingId ? cakeBrandName(row.newCakeBrandingId) : undefined}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {cakeBrandingStyles.map((b) => (
+                                  <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Select
+                              value={row.newCakePackagingId || undefined}
+                              onValueChange={(v) => v && updateAppendRow(row.rowId, { newCakePackagingId: v })}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="包裝款式">
+                                  {row.newCakePackagingId ? cakePkgName(row.newCakePackagingId) : undefined}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {cakePackagingStyles.map((ps) => (
+                                  <SelectItem key={ps.id} value={ps.id}>{ps.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    {/* 旋轉筒：原訂單已有 → 限原口味；沒有 → 新口味單選 + 包裝 */}
-                    {hasExistingTube ? (
+                    {/* 旋轉筒：已有→限原口味，沿用包裝；沒有→顯示全部口味 + 包裝下拉 */}
+                    {((hasExistingTube && existingTubes.length > 0) || (!hasExistingTube && allTubes.length > 0)) && (
                       <div className="rounded-md bg-amber-50/40 p-2 space-y-1.5">
                         <div className="text-xs font-semibold text-gray-700">
-                          旋轉筒（沿用原訂單包裝，限原口味）
+                          旋轉筒{hasExistingTube ? '（限原口味，沿用原訂單包裝）' : '（請選擇新包裝）'}
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                          {existingTubes.map((p) => (
+                          {(hasExistingTube ? existingTubes : allTubes).map((p) => (
                             <div key={p.id} className="flex items-center gap-2">
                               <span className="text-xs text-gray-600 flex-1 truncate">{p.name}</span>
                               <Input
@@ -456,42 +530,14 @@ export function SplitOrderDialog({
                             </div>
                           ))}
                         </div>
-                      </div>
-                    ) : allTubes.length > 0 && (
-                      <div className="rounded-md bg-amber-50/40 p-2 space-y-1.5">
-                        <div className="text-xs font-semibold text-gray-700">
-                          旋轉筒（選一種口味，其他反灰）
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                          {allTubes.map((p) => {
-                            const isThisFilled = tubeFilledIds.includes(p.id)
-                            const shouldDisable = tubeAnyFilled && !isThisFilled
-                            return (
-                              <div key={p.id} className="flex items-center gap-2">
-                                <span className={`text-xs flex-1 truncate ${shouldDisable ? 'text-gray-300' : 'text-gray-600'}`}>{p.name}</span>
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  value={row.items[p.id] || ''}
-                                  placeholder="0"
-                                  disabled={shouldDisable}
-                                  onChange={(e) =>
-                                    updateAppendItem(row.rowId, p.id, parseInt(e.target.value) || 0)
-                                  }
-                                  className="h-7 w-16 text-sm"
-                                />
-                              </div>
-                            )
-                          })}
-                        </div>
-                        {tubeAnyFilled && (
+                        {!hasExistingTube && allTubes.some((p) => (row.items[p.id] || 0) > 0) && (
                           <div className="pt-1">
                             <Select
                               value={row.newTubePackagingId || undefined}
                               onValueChange={(v) => v && updateAppendRow(row.rowId, { newTubePackagingId: v })}
                             >
                               <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder="選擇包裝">
+                                <SelectValue placeholder="包裝款式">
                                   {row.newTubePackagingId ? tubePkgName(row.newTubePackagingId) : undefined}
                                 </SelectValue>
                               </SelectTrigger>
@@ -506,11 +552,11 @@ export function SplitOrderDialog({
                       </div>
                     )}
 
-                    {/* 單入蛋糕：僅原訂單已有口味才開放 */}
+                    {/* 單入蛋糕：保守處理 — 僅原訂單已有口味才開放 */}
                     {hasExistingSingleCake && (
                       <div className="rounded-md bg-amber-50/40 p-2 space-y-1.5">
                         <div className="text-xs font-semibold text-gray-700">
-                          單入蛋糕（沿用原訂單包裝/烙印）
+                          單入蛋糕（沿用原訂單包裝/烙印，限原口味）
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                           {existingSingleCakes.map((p) => (
@@ -532,14 +578,14 @@ export function SplitOrderDialog({
                       </div>
                     )}
 
-                    {/* 曲奇：原訂單已有 → 限原組合；沒有 → 任意多選 */}
-                    {showCookies.length > 0 && (
+                    {/* 曲奇：永遠顯示全部，任意多選 */}
+                    {allCookies.length > 0 && (
                       <div className="rounded-md bg-amber-50/40 p-2 space-y-1.5">
                         <div className="text-xs font-semibold text-gray-700">
-                          曲奇{hasExistingCookie ? '（限原訂單品項）' : '（任意多選）'}
+                          曲奇（任意多選）
                         </div>
                         <div className="grid grid-cols-2 gap-1.5">
-                          {showCookies.map((p) => (
+                          {allCookies.map((p) => (
                             <div key={p.id} className="flex items-center gap-2">
                               <span className="text-xs text-gray-600 flex-1 truncate">{p.name}</span>
                               <Input
