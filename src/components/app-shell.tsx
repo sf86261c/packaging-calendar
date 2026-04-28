@@ -108,7 +108,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           />
         </div>
         <div className="px-3">
-          <h1 className="text-base font-bold text-foreground">📦 包裝行事曆</h1>
+          <h1 className="text-base font-bold text-foreground">包裝行事曆</h1>
           <p className="mt-0.5 text-xs text-muted-foreground">排程管理系統</p>
         </div>
       </div>
