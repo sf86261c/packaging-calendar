@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { signIn, signUp } from '@/lib/auth'
+import { signIn, signUp, useCurrentUserClient } from '@/lib/auth'
 import { logActivity } from '@/lib/activity'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,11 +11,28 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 export default function LoginPage() {
   const router = useRouter()
+  const { user, mounted } = useCurrentUserClient()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // 已登入訪問 /login → 直接跳回 /calendar，避免重複登入
+  useEffect(() => {
+    if (mounted && user) {
+      router.replace('/calendar')
+    }
+  }, [mounted, user, router])
+
+  // 還沒讀完 localStorage、或已登入要跳轉的過渡 → 不顯示表單避免閃過
+  if (!mounted || user) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <p className="text-sm text-muted-foreground">驗證中...</p>
+      </div>
+    )
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
