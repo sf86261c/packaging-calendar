@@ -427,6 +427,70 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-04-28 — 唱歌貓咪 widget + LAD 品牌 logo + sidebar 重排版
+
+**需求**：
+1. 在月曆頁加一個「會唱歌的貓咪」widget，貓咪頭頂飄出蠟筆風音符
+2. 把 LAD 品牌 logo 加到 sidebar 標題上方
+3. 移除 sidebar 的 📦 emoji
+
+**設計**
+
+1. **公開展示頁 `/cat`**
+   - 元件：`src/components/cat-eyes.tsx` 內 `SingingCat`（檔名沿用早期實驗名稱，元件已換語意）
+   - 每秒從貓咪頭頂飄出一個音符（CSS keyframe `cat-note-float`），帶 random sway / rotation / hue
+   - 配色取自原圖的粉彩色盤（窗框藍 #7da4be、腮紅 #d6a4a0、耳朵棕 #c89283、暖橘 #e0b46c…）
+   - SVG `feTurbulence + feDisplacementMap` 濾鏡 + 0.35px blur 讓音符邊緣呈蠟筆筆觸
+   - AppShell 加 `isPublicPage` 例外，`/cat` 不需登入即可訪問
+
+2. **月曆 sidebar 內的常駐 widget**
+   - 元件：`src/components/draggable-cat.tsx`（命名沿用「拖曳測試」原型階段，目前是固定位置）
+   - 位置：sidebar 內「設定」下方、帳號區上方的空白區
+     - `bottom: calc(9rem - 36px)`：貓咪底部離下方分隔線恰 10px
+     - `left: calc(2.5rem - 10px)`：靠 sidebar 左側微留白
+   - 大小：`SingingCat size={230}`（含音符的視覺區）
+   - `pointer-events-none` + `aria-hidden`：不攔截 sidebar 的點擊/讀屏
+   - `hidden md:block`：手機隱藏避免擠版（手機 sidebar 是 sheet，沒有固定的左下安全區）
+
+3. **音符飄升參數安全距離計算**
+   - 飄升距離由 240px 逐步調整為 150px（因為加了 logo 後 sidebar 變高、設定下移）
+   - 音符大小由 26~42px 縮為 17~28px（× 2/3）
+   - 量測結果：頂端音符離「設定」連結約 34~42px、貓咪底部離分隔線 10px
+
+4. **Sidebar header 加入 LAD 品牌 logo**
+   - `public/lad-logo.png`（1500×832）放於 `<h1>包裝行事曆</h1>` 上方並置中
+   - `next/image` 帶 `unoptimized`：本機 `_next/image` 優化端點異常（會回 webp 但 DOM 載入失敗）→ 改直接用原圖
+   - `max-w-[170px]` + `h-auto` 自適應 sidebar 寬度
+   - header 上下留白加大（`mb-6 + pt-3`）避免擠版
+   - `<h1>` 同步移除 📦 emoji，純文字「包裝行事曆」
+
+**取捨**
+- 元件命名（`cat-eyes` / `DraggableCat`）保留歷史名稱以免到處改 import；行為已與名稱不符，靠註解說明
+- `unoptimized` 等於放棄 next/image 的優化好處，但對單張 sidebar logo 來說影響可忽略
+- 早期嘗試過讓貓咪眼睛跟隨滑鼠（canvas 取像素 + 蒙版重貼），最終改為「唱歌」呈現；眼睛追蹤的試作版仍保留在元件內歷史 commit，必要時可回頭
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| 唱歌貓咪元件 | `src/components/cat-eyes.tsx`（新增） |
+| Sidebar 內貓咪 widget | `src/components/draggable-cat.tsx`（新增） |
+| `/cat` 公開展示頁 | `src/app/cat/page.tsx`（新增） |
+| AppShell：logo + 公開頁例外 + 移除 📦 | `src/components/app-shell.tsx` |
+| 月曆頁掛入貓咪 widget | `src/app/calendar/page.tsx` |
+| 音符飄升 keyframe | `src/app/globals.css` |
+| 貓咪原圖 | `public/cat.png`（新增） |
+| 品牌 logo | `public/lad-logo.png`（新增） |
+
+**相關 commit**：
+- `9885e23` 唱歌貓咪頁 `/cat`
+- `b5e653b` 月曆頁 sidebar 加上唱歌貓咪
+- `3cf704e` 放大為 200 / 下移 10 / 音符高度 230
+- `5adb56c` 整體左移 10px
+- `c6bffdc` 放大為 230 / 再下移 15 / 音符縮 1/3 / 高度 210
+- `8e119f6` 標題上方加入 LAD 品牌 logo
+- `5b583c0` 移除 📦 emoji、貓咪底部距分隔線 10px
+
 ### 2026-04-28 — 耗損/原料下拉支援包材（小/中/大紙箱）
 
 **需求**：「耗損」+「原料」mode 的下拉選單除了既有的 `cake_bar / tube_pkg`，還要列出包材庫存中的「小紙箱、中紙箱、大紙箱」，選擇後直接扣減 `packaging_material_inventory`。
