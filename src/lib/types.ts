@@ -134,9 +134,11 @@ export interface StockAdjustment {
 export interface StockAdjustmentItem {
   id: string
   adjustment_id: string
-  product_id: string
+  product_id: string | null
+  material_id: string | null
   quantity: number
   deduct_mode: DeductMode
   packaging_style_id: string | null
   product?: Product
+  material?: PackagingMaterial
 }

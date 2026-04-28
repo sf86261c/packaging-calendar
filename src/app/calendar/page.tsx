@@ -58,6 +58,8 @@ export default function CalendarPage() {
   const [packagingStyles, setPackagingStyles] = useState<PackagingStyle[]>([])
   const [recipes, setRecipes] = useState<ProductRecipe[]>([])
   const [materialUsages, setMaterialUsages] = useState<ProductMaterialUsage[]>([])
+  // 耗損可選的包材（小/中/大紙箱）
+  const [boxMaterials, setBoxMaterials] = useState<{ id: string; name: string }[]>([])
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -136,11 +138,17 @@ export default function CalendarPage() {
       supabase.from('packaging_styles').select('*').eq('is_active', true),
       supabase.from('product_material_usage').select('id, product_id, material_id, packaging_style_id, quantity_per_unit'),
       supabase.from('product_recipe').select('id, product_id, ingredient_id, quantity_per_unit, created_at'),
-    ]).then(([pr, pk, mu, r]) => {
+      supabase
+        .from('packaging_materials')
+        .select('id, name')
+        .in('name', ['小紙箱', '中紙箱', '大紙箱'])
+        .eq('is_active', true),
+    ]).then(([pr, pk, mu, r, mat]) => {
       if (pr.data) setProducts(pr.data as Product[])
       if (pk.data) setPackagingStyles(pk.data as PackagingStyle[])
       if (mu.data) setMaterialUsages(mu.data as ProductMaterialUsage[])
       if (r.data) setRecipes(r.data as ProductRecipe[])
+      if (mat.data) setBoxMaterials(mat.data as { id: string; name: string }[])
     })
   }, [])
 
@@ -160,32 +168,42 @@ export default function CalendarPage() {
       if (r.error || !r.data) throw new Error(`建立調整失敗：${r.error?.message ?? 'no data'}`)
       const adjustmentId = r.data.id
 
-      const itemRows = value.items.map((i) => ({
-        adjustment_id: adjustmentId,
-        product_id: i.productId,
-        quantity: parseFloat(i.quantity),
-        deduct_mode: i.deductMode,
-        packaging_style_id: i.packagingStyleId || null,
-      }))
+      // 寫入子表：material item 用 material_id（product_id 為 null）
+      const itemRows = value.items.map((i) => {
+        const isMat = i.productId.startsWith('material:')
+        const materialId = isMat ? i.productId.slice('material:'.length) : null
+        return {
+          adjustment_id: adjustmentId,
+          product_id: isMat ? null : i.productId,
+          material_id: materialId,
+          quantity: parseFloat(i.quantity),
+          deduct_mode: i.deductMode,
+          packaging_style_id: i.packagingStyleId || null,
+        }
+      })
       const r3 = await supabase.from('stock_adjustment_items').insert(itemRows)
       if (r3.error) throw new Error(`寫入扣減項失敗：${r3.error.message}`)
 
-      // 分類 finished vs ingredient
+      // 分類 finished / 原料(product) / 包材(material)
       const finishedEntries: [string, number][] = []
       const finishedPackaging: Record<string, string | null> = {}
-      const directDeductions: Record<string, number> = {}
+      const directIngredient: Record<string, number> = {}
+      const directMaterial: Record<string, number> = {}
       for (const i of value.items) {
         const qty = parseFloat(i.quantity)
         if (i.deductMode === 'finished') {
           finishedEntries.push([i.productId, qty])
           finishedPackaging[i.productId] = i.packagingStyleId || null
+        } else if (i.productId.startsWith('material:')) {
+          const matId = i.productId.slice('material:'.length)
+          directMaterial[matId] = (directMaterial[matId] || 0) + qty
         } else {
-          directDeductions[i.productId] = (directDeductions[i.productId] || 0) + qty
+          directIngredient[i.productId] = (directIngredient[i.productId] || 0) + qty
         }
       }
 
-      const totalIngredient: Record<string, number> = { ...directDeductions }
-      let totalMaterial: Record<string, number> = {}
+      const totalIngredient: Record<string, number> = { ...directIngredient }
+      const totalMaterial: Record<string, number> = { ...directMaterial }
       const adjMissingTubePkg: string[] = []
       let adjMissingMaterial: { productName: string; packagingName: string | null }[] = []
 
@@ -216,7 +234,9 @@ export default function CalendarPage() {
           (productId) => finishedPackaging[productId] ?? null,
           (id) => packagingStyles.find((ps) => ps.id === id)?.name ?? null,
         )
-        totalMaterial = matResult.deductions
+        for (const [k, v] of Object.entries(matResult.deductions)) {
+          totalMaterial[k] = (totalMaterial[k] || 0) + v
+        }
         adjMissingMaterial = matResult.missingCombos
       }
 
@@ -479,6 +499,7 @@ export default function CalendarPage() {
         onOpenChange={setAdjustmentOpen}
         products={products}
         packagingStyles={packagingStyles}
+        materials={boxMaterials}
         onSave={handleSaveAdjustment}
       />
     </div>

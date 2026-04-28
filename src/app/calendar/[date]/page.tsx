@@ -76,6 +76,8 @@ export default function DayOrderPage() {
   const [brandingStyles, setBrandingStyles] = useState<any[]>([])
   const [materialUsages, setMaterialUsages] = useState<ProductMaterialUsage[]>([])
   const [recipes, setRecipes] = useState<ProductRecipe[]>([])
+  // 耗損可選的包材（小/中/大紙箱）
+  const [boxMaterials, setBoxMaterials] = useState<{ id: string; name: string }[]>([])
   const [materialWarning, setMaterialWarning] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -167,7 +169,7 @@ export default function DayOrderPage() {
       .from('stock_adjustments')
       .select(`
         id, date, adjustment_type, note, created_at,
-        stock_adjustment_items (id, adjustment_id, product_id, quantity, deduct_mode, packaging_style_id)
+        stock_adjustment_items (id, adjustment_id, product_id, material_id, quantity, deduct_mode, packaging_style_id)
       `)
       .eq('date', dateStr)
       .order('created_at', { ascending: false })
@@ -241,12 +243,18 @@ export default function DayOrderPage() {
       supabase.from('branding_styles').select('*').eq('is_active', true),
       supabase.from('product_material_usage').select('id, product_id, material_id, packaging_style_id, quantity_per_unit'),
       supabase.from('product_recipe').select('id, product_id, ingredient_id, quantity_per_unit, created_at'),
-    ]).then(([pr, pk, br, mu, rc]) => {
+      supabase
+        .from('packaging_materials')
+        .select('id, name')
+        .in('name', ['小紙箱', '中紙箱', '大紙箱'])
+        .eq('is_active', true),
+    ]).then(([pr, pk, br, mu, rc, bm]) => {
       if (pr.data) setProducts(pr.data)
       if (pk.data) setPackagingStyles(pk.data)
       if (br.data) setBrandingStyles(br.data)
       if (mu.data) setMaterialUsages(mu.data as ProductMaterialUsage[])
       if (rc.data) setRecipes(rc.data as ProductRecipe[])
+      if (bm.data) setBoxMaterials(bm.data as { id: string; name: string }[])
     })
   }, [])
 
@@ -798,34 +806,43 @@ export default function DayOrderPage() {
         adjustmentId = r.data.id
       }
 
-      // Insert items
-      const itemRows = value.items.map((i) => ({
-        adjustment_id: adjustmentId,
-        product_id: i.productId,
-        quantity: parseFloat(i.quantity),
-        deduct_mode: i.deductMode,
-        packaging_style_id: i.packagingStyleId || null,
-      }))
+      // Insert items（material item 用 material_id，product_id 為 null）
+      const itemRows = value.items.map((i) => {
+        const isMat = i.productId.startsWith('material:')
+        const materialId = isMat ? i.productId.slice('material:'.length) : null
+        return {
+          adjustment_id: adjustmentId,
+          product_id: isMat ? null : i.productId,
+          material_id: materialId,
+          quantity: parseFloat(i.quantity),
+          deduct_mode: i.deductMode,
+          packaging_style_id: i.packagingStyleId || null,
+        }
+      })
       const r3 = await supabase.from('stock_adjustment_items').insert(itemRows)
       if (r3.error) throw new Error(`寫入扣減項失敗：${r3.error.message}`)
 
-      // 分類：finished vs ingredient
+      // 分類：finished / 原料(product) / 包材(material)
       const finishedEntries: [string, number][] = []
       const finishedPackaging: Record<string, string | null> = {}
-      const directDeductions: Record<string, number> = {}
+      const directIngredient: Record<string, number> = {}
+      const directMaterial: Record<string, number> = {}
       for (const i of value.items) {
         const qty = parseFloat(i.quantity)
         if (i.deductMode === 'finished') {
           finishedEntries.push([i.productId, qty])
           finishedPackaging[i.productId] = i.packagingStyleId || null
+        } else if (i.productId.startsWith('material:')) {
+          const matId = i.productId.slice('material:'.length)
+          directMaterial[matId] = (directMaterial[matId] || 0) + qty
         } else {
-          directDeductions[i.productId] = (directDeductions[i.productId] || 0) + qty
+          directIngredient[i.productId] = (directIngredient[i.productId] || 0) + qty
         }
       }
 
       // 整合 ingredient = direct + finished 透過 recipe 展開 + tube_pkg 特例
-      const totalIngredient: Record<string, number> = { ...directDeductions }
-      let totalMaterial: Record<string, number> = {}
+      const totalIngredient: Record<string, number> = { ...directIngredient }
+      const totalMaterial: Record<string, number> = { ...directMaterial }
       const adjMissingTubePkg: string[] = []
       let adjMissingMaterial: { productName: string; packagingName: string | null }[] = []
 
@@ -858,7 +875,9 @@ export default function DayOrderPage() {
           (productId) => finishedPackaging[productId] ?? null,
           (id) => packagingStyles.find((ps) => ps.id === id)?.name ?? null,
         )
-        totalMaterial = matResult.deductions
+        for (const [k, v] of Object.entries(matResult.deductions)) {
+          totalMaterial[k] = (totalMaterial[k] || 0) + v
+        }
         adjMissingMaterial = matResult.missingCombos
       }
       showInventoryWarnings(adjMissingMaterial, adjMissingTubePkg)
@@ -904,7 +923,10 @@ export default function DayOrderPage() {
         adjustmentType: a.adjustment_type,
         note: a.note ?? '',
         items: a.items.map((item) => ({
-          productId: item.product_id,
+          // material item 用 prefix 表示，與 dialog 的 select option value 對齊
+          productId: item.material_id
+            ? `material:${item.material_id}`
+            : (item.product_id ?? ''),
           quantity: String(item.quantity),
           deductMode: item.deduct_mode,
           packagingStyleId: item.packaging_style_id ?? '',
@@ -1249,9 +1271,18 @@ export default function DayOrderPage() {
                   </Badge>
                   <span className="text-gray-700">
                     {a.items.map((it) => {
-                      const product = products.find((p: any) => p.id === it.product_id)
-                      const modeLabel = it.deduct_mode === 'finished' ? '成品' : '原料'
-                      return `${product?.name ?? '?'} × ${it.quantity} (${modeLabel})`
+                      let name = '?'
+                      let modeLabel: string
+                      if (it.material_id) {
+                        const mat = boxMaterials.find((m) => m.id === it.material_id)
+                        name = mat?.name ?? '?'
+                        modeLabel = '包材'
+                      } else {
+                        const product = products.find((p: any) => p.id === it.product_id)
+                        name = product?.name ?? '?'
+                        modeLabel = it.deduct_mode === 'finished' ? '成品' : '原料'
+                      }
+                      return `${name} × ${it.quantity} (${modeLabel})`
                     }).join('、')}
                   </span>
                   {a.note && <span className="text-xs text-gray-400">— {a.note}</span>}
@@ -1501,6 +1532,7 @@ export default function DayOrderPage() {
         }}
         products={products as import('@/lib/types').Product[]}
         packagingStyles={packagingStyles as import('@/lib/types').PackagingStyle[]}
+        materials={boxMaterials}
         initialValue={editingAdjustment?.value}
         onSave={handleSaveAdjustment}
       />

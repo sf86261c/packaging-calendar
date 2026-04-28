@@ -28,12 +28,15 @@ interface Props {
   onOpenChange: (open: boolean) => void
   products: Product[]
   packagingStyles: PackagingStyle[]
+  // 「耗損 + 原料」mode 可選的包材清單（連動扣 packaging_material_inventory）
+  // value 規範：在 AdjustmentItemInput.productId 中以 `material:<UUID>` 表示
+  materials?: { id: string; name: string }[]
   initialValue?: AdjustmentInput
   onSave: (value: AdjustmentInput) => Promise<void>
 }
 
 export function StockAdjustmentDialog({
-  open, onOpenChange, products, packagingStyles, initialValue, onSave,
+  open, onOpenChange, products, packagingStyles, materials, initialValue, onSave,
 }: Props) {
   const [adjustmentType, setAdjustmentType] = useState<AdjustmentType>('sample')
   const [note, setNote] = useState('')
@@ -167,11 +170,16 @@ export function StockAdjustmentDialog({
             </div>
             {items.map((row, i) => {
               const productList = row.deductMode === 'finished' ? finishedProducts : ingredientProducts
-              const selectedProduct = productById(row.productId)
-              const needsPackaging = row.deductMode === 'finished'
+              const isMaterial = row.productId.startsWith('material:')
+              const selectedProduct = !isMaterial ? productById(row.productId) : undefined
+              const needsPackaging = !isMaterial
+                && row.deductMode === 'finished'
                 && selectedProduct
                 && (selectedProduct.category === 'cake' || selectedProduct.category === 'tube')
               const pkgOptions = selectedProduct ? packagingOptionsForCategory(selectedProduct.category) : []
+              const showMaterials = adjustmentType === 'waste'
+                && row.deductMode === 'ingredient'
+                && (materials?.length ?? 0) > 0
               return (
                 <div key={i} className="space-y-1.5 rounded-lg border p-2">
                   <div className="flex flex-wrap items-center gap-2">
@@ -217,6 +225,14 @@ export function StockAdjustmentDialog({
                         {productList.map((p) => (
                           <option key={p.id} value={p.id}>{p.name}</option>
                         ))}
+                        {showMaterials && (
+                          <>
+                            <option disabled>──── 包材 ────</option>
+                            {materials!.map((m) => (
+                              <option key={`m-${m.id}`} value={`material:${m.id}`}>{m.name}（包材）</option>
+                            ))}
+                          </>
+                        )}
                       </select>
                     </div>
                     <Input

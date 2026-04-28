@@ -426,6 +426,71 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-04-28 — 耗損/原料下拉支援包材（小/中/大紙箱）
+
+**需求**：「耗損」+「原料」mode 的下拉選單除了既有的 `cake_bar / tube_pkg`，還要列出包材庫存中的「小紙箱、中紙箱、大紙箱」，選擇後直接扣減 `packaging_material_inventory`。
+
+**設計**
+
+1. **Schema 變動 — Migration 027**
+   - `stock_adjustment_items` 新增 `material_id UUID` 欄位（REFERENCES `packaging_materials(id)`）
+   - `product_id` 改為 nullable
+   - CHECK constraint：`product_id` 與 `material_id` 互斥（擇一非 null）
+   - 加部分索引 `idx_stock_adjustment_items_material`（WHERE material_id IS NOT NULL）
+
+2. **`StockAdjustmentDialog` 新 prop `materials`**
+   - 型別：`{ id: string; name: string }[]`（呼叫者過濾 `name in ['小紙箱','中紙箱','大紙箱'] AND is_active=true`）
+   - 「耗損 + 原料」mode 下拉除了 `ingredientProducts`，再列出 materials；
+     option `value="material:<UUID>"`、顯示 `名稱（包材）`，前面加 disabled separator `──── 包材 ────`
+   - `selectedProduct / needsPackaging` 跳過 prefix 為 `material:` 的選項
+
+3. **`AdjustmentItemInput.productId` 用 prefix 區分**
+   - 純 UUID = product
+   - `material:<UUID>` = material
+   - 改動小（不需介面增欄位），handleSave 解析 prefix
+
+4. **`handleSaveAdjustment` 兩處同步修改**（月曆頁 + `[date]/page.tsx`）
+   - `itemRows`：material → `product_id=null, material_id=UUID`；product → `product_id=UUID, material_id=null`
+   - 分類迴圈：directIngredient（product 原料）/ directMaterial（包材）/ finishedEntries（成品）
+   - `totalIngredient = directIngredient + recipe 展開 + tube_pkg 特例`
+   - `totalMaterial = directMaterial + matResult.deductions`（若有 finished cake/tube）
+   - `replaceAdjustmentInventory` RPC 仍以 `(adjustmentId, totalIngredient, totalMaterial, date)` 簽章呼叫，負責 inventory + packaging_material_inventory 兩邊同步
+
+5. **`handleEditAdjustment` 載入既有 adjustment 時**
+   - `item.material_id` 有值 → `productId = "material:<material_id>"`（與 dialog option value 對齊）
+   - 否則 `productId = item.product_id ?? ''`
+
+6. **List 顯示**（`[date]/page.tsx`）
+   - `it.material_id` 有值 → 從 `boxMaterials` 找名稱、modeLabel = 「包材」
+   - 否則沿用既有「成品 / 原料」邏輯
+
+7. **`fetchAdjustments` select 加 `material_id`**
+
+8. **抓 boxMaterials**（兩個 page mount 時）
+   - `from('packaging_materials').select('id, name').in('name', ['小紙箱','中紙箱','大紙箱']).eq('is_active', true)`
+   - 找不到（包材還沒建）→ dialog 包材區塊不顯示，無錯誤
+
+**前置條件**
+- 包材庫存頁（`/inventory`）需先新增「小紙箱、中紙箱、大紙箱」三筆 active 包材
+- Migration 027 需在 Supabase Dashboard 執行；未執行前 `material_id` 欄位不存在，dialog 仍可選但 INSERT 會 RLS 失敗
+
+**`StockAdjustmentItem` 型別擴充**
+- `product_id: string | null`（原為 string）
+- 加 `material_id: string | null`
+- 加 `material?: PackagingMaterial`
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| Migration 027（待 Dashboard 執行） | `supabase/migrations/027_stock_adjustment_material.sql`（新增） |
+| `StockAdjustmentItem` 型別擴充 | `src/lib/types.ts` |
+| Dialog 加 materials prop + UI prefix 邏輯 | `src/components/stock-adjustment-dialog.tsx` |
+| 月曆頁 fetch boxMaterials + handleSaveAdjustment 解析 prefix + 傳 materials | `src/app/calendar/page.tsx` |
+| 日頁面 fetchAdjustments 加 material_id + handleEditAdjustment 組 prefix + handleSaveAdjustment 解析 prefix + List 顯示 material name + Dialog 傳 materials | `src/app/calendar/[date]/page.tsx` |
+
+---
+
 ### 2026-04-28 — 「今日試吃/耗損/散單」入口從日頁面移到月曆頁
 
 **變更**
