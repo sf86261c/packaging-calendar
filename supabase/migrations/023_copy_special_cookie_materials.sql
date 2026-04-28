@@ -3,10 +3,10 @@
 -- ════════════════════════════════════════════════════════════════════
 -- 依賴：022_product_is_common.sql 必須先執行（6 個特殊組合產品才存在）
 --
--- 對應規則（同口味共用配方）：
---   原味白 → 原味粉、原味藍
---   伯爵藍 → 伯爵白、伯爵粉
---   可可粉 → 可可白、可可藍
+-- 對應規則（同包裝顏色 = 同包材；曲奇命名為「口味+顏色」）：
+--   白 — 原味白 → 可可白、伯爵白
+--   粉 — 可可粉 → 原味粉、伯爵粉
+--   藍 — 伯爵藍 → 原味藍、可可藍
 --
 -- 從來源產品的 product_material_usage 動態抓取所有 (material_id,
 -- packaging_style_id, quantity_per_unit) 紀錄，複製到對應的新產品。
@@ -23,12 +23,12 @@ SELECT
 FROM product_material_usage pmu
 JOIN products old_p ON old_p.id = pmu.product_id
 JOIN (VALUES
-  ('原味白', '原味粉'),
-  ('原味白', '原味藍'),
-  ('伯爵藍', '伯爵白'),
-  ('伯爵藍', '伯爵粉'),
-  ('可可粉', '可可白'),
-  ('可可粉', '可可藍')
+  ('原味白', '可可白'),
+  ('原味白', '伯爵白'),
+  ('可可粉', '原味粉'),
+  ('可可粉', '伯爵粉'),
+  ('伯爵藍', '原味藍'),
+  ('伯爵藍', '可可藍')
 ) AS mapping(source_name, target_name)
   ON old_p.name = mapping.source_name AND old_p.category = 'cookie'
 JOIN products new_p

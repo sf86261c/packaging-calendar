@@ -230,7 +230,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `020_orders_batch_group_id.sql` | orders 加 batch_group_id UUID（取代「同名 + batch_info」隱式匹配） |
 | `021_orders_notes.sql` | orders 加 notes TEXT（保留 batch_info 中的非數字備註） |
 | `022_product_is_common.sql` | products 加 is_common BOOLEAN DEFAULT TRUE + 補入 6 個曲奇特殊組合（原味粉/原味藍/伯爵白/伯爵粉/可可白/可可藍）並標記為非常用 |
-| `023_copy_special_cookie_materials.sql` | 從原味白/伯爵藍/可可粉 的 product_material_usage 複製包材配方給對應的 6 個特殊組合 |
+| `023_copy_special_cookie_materials.sql` | 從原味白/可可粉/伯爵藍 的 product_material_usage 按「包裝顏色」複製配方給對應 6 個特殊組合 |
 
 ## 檔案結構
 
@@ -419,13 +419,13 @@ ALTER TABLE stock_adjustments
 
 **需求**：6 個曲奇特殊組合（原味粉/原味藍/伯爵白/伯爵粉/可可白/可可藍）剛被補入，沒有任何 `product_material_usage` 配方，下單時包材不會被扣減。需參考既有 3 個曲奇配方批次套用。
 
-**對應規則（同口味共用配方）**
+**對應規則（同包裝顏色共用配方；曲奇命名為「口味+顏色」，配方按顏色而非口味分配）**
 
-| 來源（既有有配方） | 目標（新組合套用相同配方） |
-|---|---|
-| 原味白 | 原味粉、原味藍 |
-| 伯爵藍 | 伯爵白、伯爵粉 |
-| 可可粉 | 可可白、可可藍 |
+| 顏色 | 來源（既有有配方） | 目標（新組合套用相同配方） |
+|---|---|---|
+| 白 | 原味白 | 可可白、伯爵白 |
+| 粉 | 可可粉 | 原味粉、伯爵粉 |
+| 藍 | 伯爵藍 | 原味藍、可可藍 |
 
 **設計**
 - Migration 023：用 `INSERT … SELECT` 動態抓取來源產品的所有 `product_material_usage` 紀錄（material_id / packaging_style_id / quantity_per_unit）複製到目標產品
