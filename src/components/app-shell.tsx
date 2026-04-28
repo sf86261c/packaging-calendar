@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -94,9 +95,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const NavLinks = ({ currentUser }: { currentUser: AuthUser }) => (
     <nav className="flex h-full flex-col p-3">
-      <div className="mb-4 px-3 py-2">
-        <h1 className="text-lg font-bold text-foreground">📦 包裝行事曆</h1>
-        <p className="text-xs text-muted-foreground">排程管理系統</p>
+      <div className="mb-6 pt-3">
+        <div className="mb-4 flex justify-center px-2">
+          <Image
+            src="/lad-logo.png"
+            alt="Like a Dream カステラ"
+            width={1500}
+            height={832}
+            priority
+            unoptimized
+            className="h-auto w-full max-w-[170px]"
+          />
+        </div>
+        <div className="px-3">
+          <h1 className="text-base font-bold text-foreground">📦 包裝行事曆</h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">排程管理系統</p>
+        </div>
       </div>
       <div className="flex flex-col gap-1">
         {visibleNav.map((item) => {
