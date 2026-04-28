@@ -227,6 +227,9 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `017_product_safety_stock.sql` | products 加 safety_stock 欄位（per-product 可編輯安全庫存）+ backfill 對齊原 hard-coded 值 |
 | `018_order_paid.sql` | orders 加 paid BOOLEAN 欄位（付款狀態，預設 FALSE） |
 | `019_product_lead_time_visibility.sql` | products 加 lead_time_days INT DEFAULT 15 + show_in_inventory BOOLEAN DEFAULT TRUE |
+| `020_orders_batch_group_id.sql` | orders 加 batch_group_id UUID（取代「同名 + batch_info」隱式匹配） |
+| `021_orders_notes.sql` | orders 加 notes TEXT（保留 batch_info 中的非數字備註） |
+| `022_product_is_common.sql` | products 加 is_common BOOLEAN DEFAULT TRUE + 補入 6 個曲奇特殊組合（原味粉/原味藍/伯爵白/伯爵粉/可可白/可可藍）並標記為非常用 |
 
 ## 檔案結構
 
@@ -410,6 +413,35 @@ ALTER TABLE stock_adjustments
 ```
 
 ## 變更紀錄
+
+### 2026-04-28 — 曲奇特殊組合預設折疊（is_common）
+
+**需求**：曲奇 6 個特殊組合（原味粉/原味藍/伯爵白/伯爵粉/可可白/可可藍）不常被訂購，不希望每次都在訂單下拉中出現。
+
+**設計**
+- Migration 022：products 加 `is_common BOOLEAN DEFAULT TRUE`，並補入 6 個特殊組合且標記 `is_common = FALSE`
+- 訂單 dialog（`OrderFormDialog` + `[date]/page.tsx` 內建 dialog）：
+  - 衍生 `commonCookieProducts` / `specialCookieProducts` / `hasSpecialCookieInForm`
+  - 預設只列 `is_common = true` 的曲奇
+  - 加切換按鈕「+ 顯示其他組合（N）」/「− 收合特殊組合（N）」
+  - 編輯訂單若已包含特殊組合（formItems 中 quantity > 0），自動展開（覆寫 toggle）
+  - 特殊組合品名以 `text-gray-500` 弱化，視覺區分
+- 設定頁面（`/settings`）：曲奇類別產品 badge 旁加「常用/特殊」toggle（其他類別不顯示），呼叫 `toggleProductCommon` 寫 DB
+
+**取捨**：保留 `is_common` 欄位給所有產品（不限 cookie），未來其他類別若有同樣需求可直接套用；目前只在 cookie 類別曝露 UI。
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| Migration 022 | `supabase/migrations/022_product_is_common.sql` |
+| `Product` interface 加 `is_common: boolean` | `src/lib/types.ts` |
+| `OrderFormDialog` 曲奇折疊邏輯 | `src/components/order-form-dialog.tsx` |
+| `[date]/page.tsx` 內建 dialog 同步處理 | `src/app/calendar/[date]/page.tsx` |
+| 設定頁 cookie 加常用/特殊 toggle + `toggleProductCommon` handler | `src/app/settings/page.tsx` |
+
+**Migration（待 Dashboard 執行）**
+- `022_product_is_common.sql` — 未執行前 `is_common` 不存在，所有切換 UI 失效；6 個特殊組合不會被補入
 
 ### 2026-04-27 — UI 動畫：日期卡 + 鈕 hover 水波 + 全 Dialog macOS Genie 動畫
 
@@ -617,6 +649,10 @@ ALTER TABLE stock_adjustments
 3. **Realtime 需手動啟用** — 需在 Supabase Dashboard > Database > Publications 中將相關表加入 `supabase_realtime` publication
 
 ## 未完成事項
+
+### 高優先 ⚠️
+
+1. **執行 Migration 022** — `022_product_is_common.sql`：未執行前 products 沒有 `is_common` 欄位，曲奇下拉的「+ 顯示其他組合」按鈕不會出現、設定頁的「常用/特殊」toggle 會 alert 錯誤；6 個特殊組合（原味粉/原味藍/伯爵白/伯爵粉/可可白/可可藍）也不會被自動補入產品清單
 
 ### 低優先
 

@@ -76,6 +76,7 @@ export function OrderFormDialog({
   const [formTubePackaging, setFormTubePackaging] = useState('')
   const [formSingleCakePackaging, setFormSingleCakePackaging] = useState<Record<string, string>>({})
   const [formSingleCakeBranding, setFormSingleCakeBranding] = useState('')
+  const [showAllCookies, setShowAllCookies] = useState(false)
   const [saving, setSaving] = useState(false)
 
   // Fetch reference data once
@@ -98,6 +99,7 @@ export function OrderFormDialog({
   // Reset / load form when opening
   useEffect(() => {
     if (!open) return
+    setShowAllCookies(false)
     if (editingOrder) {
       setFormDate(editingOrder.order_date)
       setFormName(editingOrder.customer_name)
@@ -136,6 +138,12 @@ export function OrderFormDialog({
   const tubeProducts = products.filter(p => p.category === 'tube')
   const singleCakeProducts = products.filter(p => p.category === 'single_cake')
   const cookieProducts = products.filter(p => p.category === 'cookie')
+  const commonCookieProducts = cookieProducts.filter(p => p.is_common)
+  const specialCookieProducts = cookieProducts.filter(p => !p.is_common)
+  const hasSpecialCookieInForm = specialCookieProducts.some(p => (formItems[p.id] || 0) > 0)
+  const visibleCookieProducts = showAllCookies || hasSpecialCookieInForm
+    ? cookieProducts
+    : commonCookieProducts
 
   const formHasCake = cakeProducts.some(p => (formItems[p.id] || 0) > 0)
   const formHasTube = tubeProducts.some(p => (formItems[p.id] || 0) > 0)
@@ -434,13 +442,22 @@ export function OrderFormDialog({
             <div className="rounded-lg border p-3 space-y-2">
               <Label className="text-sm font-semibold">曲奇</Label>
               <div className="grid grid-cols-2 gap-2">
-                {cookieProducts.map(p => (
+                {visibleCookieProducts.map(p => (
                   <div key={p.id} className="flex items-center gap-2">
-                    <span className="text-sm w-24 truncate">{p.name}</span>
+                    <span className={`text-sm w-24 truncate ${!p.is_common ? 'text-gray-500' : ''}`}>{p.name}</span>
                     <Input type="number" min={0} className="w-20" value={formItems[p.id] || ''} onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))} placeholder="0" />
                   </div>
                 ))}
               </div>
+              {specialCookieProducts.length > 0 && !hasSpecialCookieInForm && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllCookies(s => !s)}
+                  className="text-xs text-gray-500 hover:text-gray-900 underline-offset-2 hover:underline"
+                >
+                  {showAllCookies ? `− 收合特殊組合（${specialCookieProducts.length}）` : `+ 顯示其他組合（${specialCookieProducts.length}）`}
+                </button>
+              )}
             </div>
           )}
 

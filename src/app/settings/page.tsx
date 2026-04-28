@@ -41,6 +41,7 @@ interface Product {
   name: string
   sort_order: number
   is_active: boolean
+  is_common: boolean
 }
 
 interface PackagingStyle {
@@ -425,6 +426,18 @@ export default function SettingsPage() {
     fetchProducts()
   }
 
+  const toggleProductCommon = async (id: string, currentCommon: boolean) => {
+    const { error } = await supabase
+      .from('products')
+      .update({ is_common: !currentCommon })
+      .eq('id', id)
+    if (error) {
+      alert(`切換常用狀態失敗：${error.message}`)
+      return
+    }
+    fetchProducts()
+  }
+
   // --- Recipe / material row handlers (used in Task 7 Dialog UI) -----------
 
   const addRecipeRow = () =>
@@ -641,6 +654,19 @@ export default function SettingsPage() {
                       >
                         📋
                       </Button>
+                      {product.category === 'cookie' && (
+                        <Button
+                          variant={product.is_common ? 'default' : 'outline'}
+                          size="xs"
+                          onClick={() =>
+                            toggleProductCommon(product.id, product.is_common)
+                          }
+                          className="min-w-[48px] text-[10px]"
+                          title={product.is_common ? '常用組合（訂單下拉預設顯示）' : '特殊組合（訂單下拉需展開才顯示）'}
+                        >
+                          {product.is_common ? '常用' : '特殊'}
+                        </Button>
+                      )}
                       <ActiveToggle
                         isActive={product.is_active}
                         onToggle={() =>
