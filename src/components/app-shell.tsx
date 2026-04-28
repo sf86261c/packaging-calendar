@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
-import { useCurrentUserClient, signOut, type AuthUser } from '@/lib/auth'
+import { useCurrentUserClient, signOut, getSessionExpiresAt, type AuthUser } from '@/lib/auth'
 import { logActivity } from '@/lib/activity'
 
 interface NavItem {
@@ -41,6 +41,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       router.replace('/login')
     }
   }, [mounted, user, isLoginPage, router])
+
+  // Session 10 小時固定到期：在到期時間自動登出 + 跳 login
+  // 不會因為頁面切換而 reset（AppShell 是 layout 級別，不會 unmount）
+  useEffect(() => {
+    if (!mounted || !user) return
+    const expiresAt = getSessionExpiresAt()
+    if (!expiresAt) return
+    const remaining = expiresAt - Date.now()
+    if (remaining <= 0) {
+      logActivity('帳號.自動登出', `user:${user.id}`, {
+        username: user.username,
+        reason: 'session_expired',
+      })
+      signOut()
+      router.replace('/login')
+      return
+    }
+    const timer = setTimeout(() => {
+      logActivity('帳號.自動登出', `user:${user.id}`, {
+        username: user.username,
+        reason: 'session_expired',
+      })
+      signOut()
+      router.replace('/login')
+    }, remaining)
+    return () => clearTimeout(timer)
+  }, [mounted, user, router])
 
   // /login 頁不顯示側邊欄
   if (isLoginPage) {

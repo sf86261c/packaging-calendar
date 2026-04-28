@@ -10,6 +10,14 @@ export interface AuthUser {
 }
 
 const STORAGE_KEY = 'packaging-calendar:auth'
+const SESSION_TTL_MS = 10 * 60 * 60 * 1000  // 10 小時固定時長
+
+interface StoredSession {
+  id: string
+  username: string
+  is_admin: boolean
+  expiresAt: number
+}
 
 // ─── Pub/sub for cross-component reactive updates ───
 type Listener = () => void
@@ -24,40 +32,86 @@ function notify() {
 // 因此在 module level cache 解析結果，只有 raw string 變化時才重新 parse。
 let cachedRaw: string | null = null
 let cachedUser: AuthUser | null = null
+let cachedExpiresAt: number | null = null
+
+function clearSession() {
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(STORAGE_KEY)
+  }
+  cachedRaw = null
+  cachedUser = null
+  cachedExpiresAt = null
+}
 
 function readUser(): AuthUser | null {
   if (typeof window === 'undefined') return null
   const raw = window.localStorage.getItem(STORAGE_KEY)
-  if (raw === cachedRaw) return cachedUser
+  if (raw === cachedRaw) {
+    // 同一筆 cache，但仍要檢查是否過期（時間流逝）
+    if (cachedExpiresAt !== null && Date.now() >= cachedExpiresAt) {
+      clearSession()
+      return null
+    }
+    return cachedUser
+  }
   cachedRaw = raw
   if (!raw) {
     cachedUser = null
+    cachedExpiresAt = null
     return cachedUser
   }
   try {
-    const parsed = JSON.parse(raw)
+    const parsed = JSON.parse(raw) as Partial<StoredSession>
     if (
       parsed &&
       typeof parsed.id === 'string' &&
       typeof parsed.username === 'string' &&
-      typeof parsed.is_admin === 'boolean'
+      typeof parsed.is_admin === 'boolean' &&
+      typeof parsed.expiresAt === 'number'
     ) {
-      cachedUser = parsed as AuthUser
+      if (Date.now() >= parsed.expiresAt) {
+        // 過期：清除 storage 並回傳 null
+        clearSession()
+        return null
+      }
+      cachedExpiresAt = parsed.expiresAt
+      cachedUser = {
+        id: parsed.id,
+        username: parsed.username,
+        is_admin: parsed.is_admin,
+      }
     } else {
       cachedUser = null
+      cachedExpiresAt = null
     }
   } catch {
     cachedUser = null
+    cachedExpiresAt = null
   }
   return cachedUser
+}
+
+export function getSessionExpiresAt(): number | null {
+  if (typeof window === 'undefined') return null
+  // 觸發 readUser 來更新 cache（保持與 cachedExpiresAt 同步）
+  readUser()
+  return cachedExpiresAt
 }
 
 function writeUser(user: AuthUser | null) {
   if (typeof window === 'undefined') return
   if (user) {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(user))
+    const session: StoredSession = {
+      ...user,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    }
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
+    // 寫入後立即更新 cache（避免下次 read 命中舊 cache）
+    cachedRaw = window.localStorage.getItem(STORAGE_KEY)
+    cachedUser = user
+    cachedExpiresAt = session.expiresAt
   } else {
-    window.localStorage.removeItem(STORAGE_KEY)
+    clearSession()
   }
   notify()
 }
