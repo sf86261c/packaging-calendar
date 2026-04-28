@@ -2,6 +2,11 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* 整體放大 1.3 倍：Tailwind 用 rem 為基底，動 root font-size 即可 cascade */
+html {
+  font-size: 130%;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
