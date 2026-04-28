@@ -24,8 +24,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const NavLinks = () => (
     <nav className="flex flex-col gap-1 p-3">
       <div className="mb-4 px-3 py-2">
-        <h1 className="text-lg font-bold text-gray-800">📦 包裝行事曆</h1>
-        <p className="text-xs text-gray-500">排程管理系統</p>
+        <h1 className="text-lg font-bold text-foreground">📦 包裝行事曆</h1>
+        <p className="text-xs text-muted-foreground">排程管理系統</p>
       </div>
       {navItems.map((item) => {
         const isActive = pathname.startsWith(item.href)
@@ -36,8 +36,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             onClick={() => setMobileOpen(false)}
             className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
               isActive
-                ? 'bg-blue-50 text-blue-700'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                ? 'bg-accent text-accent-foreground'
+                : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
             }`}
           >
             <item.icon className="h-5 w-5" />
@@ -49,9 +49,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   )
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-background">
       {/* Desktop sidebar */}
-      <aside className="hidden w-56 border-r border-gray-200 bg-white md:block">
+      <aside className="hidden w-56 border-r border-sidebar-border bg-sidebar md:block">
         <NavLinks />
       </aside>
 
@@ -59,12 +59,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Top bar */}
-          <header className="flex h-14 items-center justify-between border-b border-gray-200 bg-white px-4 md:hidden">
+          <header className="flex h-14 items-center justify-between border-b border-sidebar-border bg-sidebar px-4 md:hidden">
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="icon" onClick={() => setMobileOpen(true)}>
                 <Menu className="h-5 w-5" />
               </Button>
-              <span className="text-sm font-medium text-gray-700">
+              <span className="text-sm font-medium text-foreground">
                 📦 包裝行事曆
               </span>
             </div>

@@ -19,6 +19,15 @@ interface DaySummary {
   pending: number
 }
 
+interface SearchHit {
+  id: string
+  customer_name: string
+  order_date: string
+  items_summary: string
+  printed: boolean
+  paid: boolean
+}
+
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
 
 export default function CalendarPage() {
@@ -30,11 +39,73 @@ export default function CalendarPage() {
   const [quickAddDate, setQuickAddDate] = useState<string | null>(null)
   const [materialWarning, setMaterialWarning] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchHit[]>([])
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchLoading, setSearchLoading] = useState(false)
+  const searchBoxRef = useRef<HTMLDivElement>(null)
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     const q = searchQuery.trim()
-    if (q) router.push(`/search?q=${encodeURIComponent(q)}`)
+    if (q) {
+      setSearchOpen(false)
+      router.push(`/search?q=${encodeURIComponent(q)}`)
+    }
+  }
+
+  // Debounced 即時搜尋（每次 keypress 後 180ms 執行 ilike 查詢）
+  useEffect(() => {
+    const q = searchQuery.trim()
+    if (!q) {
+      setSearchResults([])
+      setSearchOpen(false)
+      return
+    }
+    const timer = setTimeout(async () => {
+      setSearchLoading(true)
+      const { data } = await supabase
+        .from('orders')
+        .select('id, customer_name, order_date, printed, paid, order_items(quantity, product:products(name))')
+        .ilike('customer_name', `%${q}%`)
+        .order('order_date', { ascending: false })
+        .limit(10)
+      if (data) {
+        const hits: SearchHit[] = data.map((o: any) => {
+          const items = (o.order_items || []).filter((i: any) => i.quantity > 0)
+          const summary = items.map((i: any) => `${i.product?.name ?? '?'}×${i.quantity}`).join(', ') || '無品項'
+          return {
+            id: o.id,
+            customer_name: o.customer_name,
+            order_date: o.order_date,
+            items_summary: summary,
+            printed: !!o.printed,
+            paid: !!o.paid,
+          }
+        })
+        setSearchResults(hits)
+        setSearchOpen(true)
+      }
+      setSearchLoading(false)
+    }, 180)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // 點擊搜尋框外部 → 關閉結果列表
+  useEffect(() => {
+    if (!searchOpen) return
+    const handler = (e: MouseEvent) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
+        setSearchOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [searchOpen])
+
+  const handleSelectResult = (date: string) => {
+    setSearchOpen(false)
+    setSearchQuery('')
+    router.push(`/calendar/${date}`)
   }
 
   useEffect(() => {
@@ -105,17 +176,60 @@ export default function CalendarPage() {
         </h1>
         <div className="flex items-center gap-2">
           {loading && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
-          <form onSubmit={handleSearchSubmit} className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-            <Input
-              type="search"
-              placeholder="搜尋客戶..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-9 w-44 pl-8 text-sm"
-              aria-label="搜尋客戶"
-            />
-          </form>
+          <div ref={searchBoxRef} className="relative">
+            <form onSubmit={handleSearchSubmit}>
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder="搜尋客戶..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => searchResults.length > 0 && setSearchOpen(true)}
+                className="h-9 w-44 pl-8 text-sm"
+                aria-label="搜尋客戶"
+              />
+              {searchLoading && (
+                <Loader2 className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-muted-foreground" />
+              )}
+            </form>
+            {searchOpen && searchQuery.trim() && (
+              <div className="absolute right-0 top-full z-50 mt-1 w-80 max-h-96 overflow-y-auto rounded-md border border-border bg-popover shadow-lg ring-1 ring-foreground/5">
+                {searchResults.length === 0 && !searchLoading && (
+                  <div className="px-3 py-3 text-xs text-muted-foreground">
+                    找不到「{searchQuery}」相關訂單
+                  </div>
+                )}
+                {searchResults.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => handleSelectResult(r.order_date)}
+                    className={`block w-full border-b border-border/50 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-accent ${r.printed ? 'bg-yellow-50/40' : ''}`}
+                  >
+                    <div className="text-sm font-medium text-foreground">
+                      {r.customer_name}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {r.order_date} · {r.items_summary}
+                    </div>
+                    <div className="mt-0.5 text-[10px] text-muted-foreground">
+                      {r.printed ? '✅ 已列印' : '⏳ 未列印'}
+                      {r.paid ? ' · 💰 已付款' : ' · 💸 未付款'}
+                    </div>
+                  </button>
+                ))}
+                {searchResults.length >= 10 && (
+                  <button
+                    type="button"
+                    onClick={(e) => handleSearchSubmit(e as unknown as React.FormEvent)}
+                    className="block w-full border-t border-border bg-muted/50 px-3 py-2 text-center text-xs text-primary hover:bg-accent"
+                  >
+                    查看完整結果 →
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           <Button variant="outline" size="icon" onClick={() => setCurrentMonth(m => subMonths(m, 1))}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
