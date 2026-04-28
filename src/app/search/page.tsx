@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { Search, Loader2, Pencil } from 'lucide-react'
@@ -109,6 +109,16 @@ export default function SearchPage() {
     setQuery(q)
     runSearch(q)
   }
+
+  // 從 URL ?q= 預填搜尋（由月曆頁右上搜尋框跳轉而來）
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const initialQ = params.get('q')
+    if (initialQ) {
+      setQuery(initialQ)
+      runSearch(initialQ)
+    }
+  }, [runSearch])
 
   const openEdit = (r: SearchResult) => {
     setEditing({

@@ -5,9 +5,10 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths, isToday, differenceInCalendarDays } from 'date-fns'
 import { zhTW } from 'date-fns/locale'
-import { ChevronLeft, ChevronRight, CalendarDays, Loader2, Plus } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CalendarDays, Loader2, Plus, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { OrderFormDialog } from '@/components/order-form-dialog'
 
 interface DaySummary {
@@ -28,6 +29,13 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true)
   const [quickAddDate, setQuickAddDate] = useState<string | null>(null)
   const [materialWarning, setMaterialWarning] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const q = searchQuery.trim()
+    if (q) router.push(`/search?q=${encodeURIComponent(q)}`)
+  }
 
   useEffect(() => {
     if (!materialWarning) return
@@ -97,6 +105,17 @@ export default function CalendarPage() {
         </h1>
         <div className="flex items-center gap-2">
           {loading && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
+          <form onSubmit={handleSearchSubmit} className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+            <Input
+              type="search"
+              placeholder="搜尋客戶..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-9 w-44 pl-8 text-sm"
+              aria-label="搜尋客戶"
+            />
+          </form>
           <Button variant="outline" size="icon" onClick={() => setCurrentMonth(m => subMonths(m, 1))}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
