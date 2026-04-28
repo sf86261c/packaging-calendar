@@ -57,7 +57,7 @@ export function SingingCat({ size = 400, className }: SingingCatProps) {
         swayPx: swayDir * (32 + Math.random() * 48),
         rotateStart: -18 + Math.random() * 36,
         rotateEnd: -45 + Math.random() * 90,
-        size: 26 + Math.random() * 16,
+        size: (26 + Math.random() * 16) * (2 / 3),
         color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)],
         duration: 4200 + Math.random() * 1800,
         filterIndex: Math.floor(Math.random() * 4),
