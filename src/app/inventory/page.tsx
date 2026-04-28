@@ -356,7 +356,7 @@ export default function InventoryPage() {
       <Card key={p.id}>
         <CardContent className="pt-4">
           <div className="flex items-center justify-between gap-2">
-            <span className="font-medium truncate">{p.name}</span>
+            <span className="font-medium break-words">{p.name}</span>
             <div className="flex items-center gap-1">
               {isEditingLead ? (
                 <div className="flex items-center gap-1">
@@ -447,7 +447,7 @@ export default function InventoryPage() {
       <Card key={m.id}>
         <CardContent className="pt-4">
           <div className="flex items-center justify-between">
-            <span className="font-medium truncate">{m.name}</span>
+            <span className="font-medium break-words">{m.name}</span>
             <div className="flex items-center gap-1">
               <Badge variant="outline" className="text-[10px] text-gray-500">D+{m.lead_time_days ?? 7}</Badge>
               {isLow && <Badge variant="destructive" className="text-xs">低庫存</Badge>}
