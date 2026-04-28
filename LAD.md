@@ -34,6 +34,7 @@
 | 操作紀錄 | `/activity` | ✅ 完成 | 表格化顯示最近 500 筆寫入操作：日期/時間/操作者/客戶/改動項目/詳情；mount 時順手清理 >30 天紀錄；支援帳號/動作/客戶篩選 |
 | 設定 | `/settings` | ✅ 完成（admin only） | 產品/包裝/烙印 CRUD、**新增產品可同步設定原料配方與包材消耗**、每項產品可📋編輯配方；**僅 admin 可進入**（非 admin 顯示無權限卡片） |
 | 登入/註冊 | `/login` | ✅ 完成 | 單頁 toggle sign-in / sign-up；已登入自動跳 `/calendar`；註冊自動登入 |
+| 唱歌貓咪 | `/cat` | ✅ 完成 | 貓咪頭頂每秒飄出一個彩色音符往上飛，3.6~5.2 秒內淡出；CSS keyframe 配 random sway/rotation。元件 `src/components/cat-eyes.tsx`（`SingingCat`），無需登入可直接訪問 |
 
 **全域 auth 行為**：
 - 任何受保護頁面在未登入時自動跳 `/login`

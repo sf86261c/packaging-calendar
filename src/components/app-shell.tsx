@@ -34,13 +34,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
 
   const isLoginPage = pathname === '/login'
+  const isPublicPage = isLoginPage || pathname === '/cat'
 
-  // 全域 guard：未登入強制跳轉 /login（除了 /login 頁本身）
+  // 全域 guard：未登入強制跳轉 /login（除了公開頁面）
   useEffect(() => {
-    if (mounted && !user && !isLoginPage) {
+    if (mounted && !user && !isPublicPage) {
       router.replace('/login')
     }
-  }, [mounted, user, isLoginPage, router])
+  }, [mounted, user, isPublicPage, router])
 
   // Session 10 小時固定到期：在到期時間自動登出 + 跳 login
   // 不會因為頁面切換而 reset（AppShell 是 layout 級別，不會 unmount）
@@ -69,8 +70,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(timer)
   }, [mounted, user, router])
 
-  // /login 頁不顯示側邊欄
-  if (isLoginPage) {
+  // 公開頁面（/login、/cat）不顯示側邊欄
+  if (isPublicPage) {
     return <main className="min-h-screen bg-background p-4 md:p-6">{children}</main>
   }
 

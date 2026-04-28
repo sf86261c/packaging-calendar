@@ -172,3 +172,31 @@ html {
     animation-duration: 1ms;
   }
 }
+
+/* 唱歌貓咪用：音符往上飄、左右飄移、淡入淡出
+ * --sway / --rs / --re 由 inline style 注入個別音符的飄移與旋轉。
+ */
+@keyframes cat-note-float {
+  0% {
+    transform: translate(-50%, -50%) rotate(var(--rs, 0deg)) scale(0.6);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--sway, 0px) * 0.15), calc(-50% - 30px)) rotate(calc(var(--rs, 0deg) * 0.7)) scale(1);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(calc(-50% + var(--sway, 0px)), calc(-50% - 240px)) rotate(var(--re, 0deg)) scale(0.95);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cat-note {
+    animation: none !important;
+    opacity: 0 !important;
+  }
+}
