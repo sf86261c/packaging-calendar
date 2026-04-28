@@ -230,6 +230,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `020_orders_batch_group_id.sql` | orders 加 batch_group_id UUID（取代「同名 + batch_info」隱式匹配） |
 | `021_orders_notes.sql` | orders 加 notes TEXT（保留 batch_info 中的非數字備註） |
 | `022_product_is_common.sql` | products 加 is_common BOOLEAN DEFAULT TRUE + 補入 6 個曲奇特殊組合（原味粉/原味藍/伯爵白/伯爵粉/可可白/可可藍）並標記為非常用 |
+| `023_copy_special_cookie_materials.sql` | 從原味白/伯爵藍/可可粉 的 product_material_usage 複製包材配方給對應的 6 個特殊組合 |
 
 ## 檔案結構
 
@@ -413,6 +414,32 @@ ALTER TABLE stock_adjustments
 ```
 
 ## 變更紀錄
+
+### 2026-04-28 — 曲奇特殊組合包材配方複製
+
+**需求**：6 個曲奇特殊組合（原味粉/原味藍/伯爵白/伯爵粉/可可白/可可藍）剛被補入，沒有任何 `product_material_usage` 配方，下單時包材不會被扣減。需參考既有 3 個曲奇配方批次套用。
+
+**對應規則（同口味共用配方）**
+
+| 來源（既有有配方） | 目標（新組合套用相同配方） |
+|---|---|
+| 原味白 | 原味粉、原味藍 |
+| 伯爵藍 | 伯爵白、伯爵粉 |
+| 可可粉 | 可可白、可可藍 |
+
+**設計**
+- Migration 023：用 `INSERT … SELECT` 動態抓取來源產品的所有 `product_material_usage` 紀錄（material_id / packaging_style_id / quantity_per_unit）複製到目標產品
+- `NOT EXISTS` 守門：若目標產品已有任何配方則整批跳過 → 重複執行安全、不會覆蓋使用者手動修改的配方
+- 不需要 `product_recipe`（曲奇本就「獨立計算」，不依賴 cake_bar 原料）
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| Migration 023 | `supabase/migrations/023_copy_special_cookie_materials.sql` |
+
+**Migration（待 Dashboard 執行）**
+- 必須先執行 022（補入新產品）再執行 023（複製配方）
 
 ### 2026-04-28 — 曲奇特殊組合預設折疊（is_common）
 
@@ -652,7 +679,9 @@ ALTER TABLE stock_adjustments
 
 ### 高優先 ⚠️
 
-1. **執行 Migration 022** — `022_product_is_common.sql`：未執行前 products 沒有 `is_common` 欄位，曲奇下拉的「+ 顯示其他組合」按鈕不會出現、設定頁的「常用/特殊」toggle 會 alert 錯誤；6 個特殊組合（原味粉/原味藍/伯爵白/伯爵粉/可可白/可可藍）也不會被自動補入產品清單
+1. **執行 Migration 022 + 023**（需依序）：
+   - `022_product_is_common.sql`：products 加 `is_common`、補入 6 個特殊組合
+   - `023_copy_special_cookie_materials.sql`：從原味白/伯爵藍/可可粉 複製包材配方到對應 6 個新組合（023 必須在 022 之後執行，否則新產品還不存在，配方複製會 0 rows）
 
 ### 低優先
 
