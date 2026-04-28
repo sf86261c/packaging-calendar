@@ -233,6 +233,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `023_copy_special_cookie_materials.sql` | 從原味白/可可粉/伯爵藍 的 product_material_usage 按「包裝顏色」複製配方給對應 6 個特殊組合 |
 | `024_app_users_auth.sql` | app_users + sign_up/sign_in RPC（pgcrypto bcrypt）+ seed admin/admin888 |
 | `025_activity_logs.sql` | activity_logs 表 + log_activity / cleanup_old_activity_logs RPC（30 天自動清理） |
+| `026_fix_auth_search_path.sql` | 修正 sign_up / sign_in search_path 為 `public, extensions`，解決 pgcrypto `gen_salt does not exist` |
 
 ## 檔案結構
 
@@ -728,9 +729,10 @@ ALTER TABLE stock_adjustments
 1. **執行 Migration 022 + 023**（需依序）：
    - `022_product_is_common.sql`：products 加 `is_common`、補入 6 個特殊組合
    - `023_copy_special_cookie_materials.sql`：從原味白/伯爵藍/可可粉 複製包材配方到對應 6 個新組合（023 必須在 022 之後執行，否則新產品還不存在，配方複製會 0 rows）
-2. **執行 Migration 024 + 025**：
+2. **執行 Migration 024 + 025 + 026**：
    - `024_app_users_auth.sql`：建立 app_users 表 + sign_up/sign_in RPC + seed admin/admin888
    - `025_activity_logs.sql`：建立 activity_logs 表 + log_activity / cleanup_old_activity_logs RPC
+   - `026_fix_auth_search_path.sql`：修正 RPC search_path（024 沒包含 extensions schema，導致註冊報錯 `gen_salt does not exist`）
    - 未執行前：登入/註冊 alert 錯誤；操作紀錄頁面空白；設定頁所有非管理員都無法存取
 
 ### 低優先
