@@ -426,6 +426,45 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-04-28 — 新增訂單同名客戶偵測 +「非相同客戶」確認
+
+**需求**：避免使用者在新增訂單時把與同名同姓既有客戶的訂單建成獨立訂單，導致「分批/追加」UI 上的兄弟批次連動錯亂。
+
+**設計**
+
+1. **同名偵測（debounce 180ms）**
+   - 僅新增模式（`!editingOrder`）+ dialog 開啟時對 `customer_name` 做精確匹配查詢
+   - 編輯模式不檢測（修正錯字、改名等情境會永遠匹配自己）
+   - 共用元件 `OrderFormDialog`（月曆右上 + 鈕）與 `[date]/page.tsx` 內建 dialog（日訂單頁 + 鈕、編輯入口）兩處同步處理
+
+2. **UI 提醒**
+   - 客戶姓名 Label 旁顯示紅字：「已存在客戶，請使用分批/追加功能」
+   - Input 下方出現 checkbox：「非相同客戶（建立獨立訂單）」
+
+3. **儲存守門**
+   - 新增模式 + 同名 + 未勾選「非相同客戶」 → 儲存按鈕 disabled
+   - handler 開頭加 `if (!editingOrder && duplicateName && !confirmedDifferent) return` 雙保險
+   - 勾選「非相同客戶」後按鈕解鎖
+
+4. **batch_group_id 顯式分配**
+   - 勾選「非相同客戶」時，新訂單 `batch_group_id = crypto.randomUUID()`（其他情境保持 NULL）
+   - 確保即便未來該訂單被「分批/追加」，也不會跟現有同名訂單在分批 UI 上連動
+   - 雖然 NULL 本來就不會誤連動（migration 020 設計），但顯式分配 UUID 表達「這是使用者確認過的獨立訂單群」
+
+**state 重置邏輯**
+- `formName / editingOrderId / dialogOpen` 任一變動 → reset `confirmedDifferent`（避免改名後仍套用前次確認）
+- 編輯模式 / dialog 關閉 / formName 為空 → `setDuplicateName(false)`
+- 防止下次 open dialog 時殘留前次紅字或勾選狀態
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| OrderFormDialog（月曆右上 + 鈕快速新增） | `src/components/order-form-dialog.tsx` |
+| 日訂單頁內建 dialog（+ 鈕新增 / 編輯） | `src/app/calendar/[date]/page.tsx` |
+
+---
+
 ### 2026-04-28 — 庫存頁 admin guard + LINE 推播 UID 更新
 
 **1. 庫存頁僅 admin 可編輯（其他人僅可查看）**

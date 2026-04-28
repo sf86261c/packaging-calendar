@@ -95,6 +95,8 @@ export default function DayOrderPage() {
   const [formSingleCakeBranding, setFormSingleCakeBranding] = useState('')
   const [showAllCookies, setShowAllCookies] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [duplicateName, setDuplicateName] = useState(false)
+  const [confirmedDifferent, setConfirmedDifferent] = useState(false)
 
   // Adjustment state
   const [adjustments, setAdjustments] = useState<(StockAdjustment & { items: StockAdjustmentItem[] })[]>([])
@@ -274,6 +276,33 @@ export default function DayOrderPage() {
     return () => clearTimeout(timer)
   }, [materialWarning])
 
+  // 同名偵測：僅新增模式 + dialog 開啟時對 customer_name 做 debounce 檢查
+  useEffect(() => {
+    setConfirmedDifferent(false)
+    if (editingOrderId || !dialogOpen) {
+      setDuplicateName(false)
+      return
+    }
+    const trimmed = formName.trim()
+    if (!trimmed) {
+      setDuplicateName(false)
+      return
+    }
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from('orders')
+        .select('id')
+        .eq('customer_name', trimmed)
+        .limit(1)
+      if (!cancelled) setDuplicateName(!!data && data.length > 0)
+    }, 180)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [formName, editingOrderId, dialogOpen])
+
   // ─── Form helpers ───────────────────────────────────
 
   const resetForm = () => {
@@ -402,9 +431,10 @@ export default function DayOrderPage() {
 
   const handleSaveOrder = async () => {
     if (!formName.trim() || !formDate) return
+    if (!editingOrderId && duplicateName && !confirmedDifferent) return
     setSaving(true)
 
-    const orderData = {
+    const orderData: Record<string, unknown> = {
       order_date: formDate,
       customer_name: formName.trim(),
       status: formStatus || '待',
@@ -415,6 +445,10 @@ export default function DayOrderPage() {
       tube_packaging_id: formTubePackaging || null,
       single_cake_packaging_id: null, // per-item packaging now stored in order_items
       single_cake_branding_text: formSingleCakeBranding || null,
+    }
+    // 「非相同客戶」勾選 → 分配新 batch_group_id，避免與現有同名訂單在分批 UI 上連動
+    if (!editingOrderId && confirmedDifferent) {
+      orderData.batch_group_id = crypto.randomUUID()
     }
 
     const itemEntries = Object.entries(formItems).filter(([, qty]) => qty > 0)
@@ -1211,8 +1245,26 @@ export default function DayOrderPage() {
                 <Input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} />
               </div>
               <div>
-                <Label>客戶姓名 *</Label>
+                <div className="flex items-center gap-2">
+                  <Label>客戶姓名 *</Label>
+                  {!editingOrderId && duplicateName && (
+                    <span className="text-xs font-semibold text-red-600">
+                      已存在客戶，請使用分批/追加功能
+                    </span>
+                  )}
+                </div>
                 <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="姓名" />
+                {!editingOrderId && duplicateName && (
+                  <label className="mt-1 flex cursor-pointer items-center gap-1 text-xs text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={confirmedDifferent}
+                      onChange={e => setConfirmedDifferent(e.target.checked)}
+                      className="h-3.5 w-3.5"
+                    />
+                    <span>非相同客戶（建立獨立訂單）</span>
+                  </label>
+                )}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -1384,7 +1436,16 @@ export default function DayOrderPage() {
               </div>
             )}
 
-            <Button className="w-full" onClick={handleSaveOrder} disabled={saving || !formName.trim() || !formDate}>
+            <Button
+              className="w-full"
+              onClick={handleSaveOrder}
+              disabled={
+                saving ||
+                !formName.trim() ||
+                !formDate ||
+                (!editingOrderId && duplicateName && !confirmedDifferent)
+              }
+            >
               {saving ? '儲存中...' : editingOrderId ? '儲存變更' : '新增訂單'}
             </Button>
           </div>
