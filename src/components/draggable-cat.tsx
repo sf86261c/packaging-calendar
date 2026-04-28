@@ -17,7 +17,7 @@ export function DraggableCat() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed bottom-[calc(9rem-25px)] left-10 z-40 hidden md:block"
+      className="pointer-events-none fixed bottom-[calc(9rem-25px)] left-[calc(2.5rem-10px)] z-40 hidden md:block"
     >
       <SingingCat size={CAT_SIZE} />
     </div>
