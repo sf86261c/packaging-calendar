@@ -6,6 +6,9 @@ import { Input } from '@/components/ui/input'
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { PlusIcon, XIcon } from 'lucide-react'
 import type { Product } from '@/lib/types'
 
@@ -17,6 +20,8 @@ export interface SplitInput {
 export interface AppendInput {
   date: string
   items: Record<string, number>
+  // effective tube_packaging_id：原訂單已有旋轉筒則沿用、否則為使用者在追加 dialog 選的新包裝；無旋轉筒品項時為 null
+  tubePackagingId?: string | null
 }
 
 export interface SplitOrAppendResult {
@@ -34,6 +39,7 @@ interface AppendRow {
   rowId: string
   date: string
   items: Record<string, number>
+  newTubePackagingId: string  // 使用者選的旋轉筒包裝（僅原訂單沒有旋轉筒時用）
 }
 
 interface Props {
@@ -42,6 +48,8 @@ interface Props {
   originalDate: string
   poolItems: Record<string, number>
   appendableProductIds: string[]
+  tubePackagingStyles: { id: string; name: string }[]
+  originalTubePackagingId?: string | null  // 原訂單的旋轉筒包裝（用於繼承到追加訂單）
   products: Product[]
   onConfirm: (result: SplitOrAppendResult) => Promise<void>
 }
@@ -56,10 +64,12 @@ const newAppendRow = (defaultDate: string): AppendRow => ({
   rowId: Math.random().toString(36).slice(2),
   date: defaultDate,
   items: {},
+  newTubePackagingId: '',
 })
 
 export function SplitOrderDialog({
-  open, onOpenChange, originalDate, poolItems, appendableProductIds, products, onConfirm,
+  open, onOpenChange, originalDate, poolItems, appendableProductIds,
+  tubePackagingStyles, originalTubePackagingId, products, onConfirm,
 }: Props) {
   const [splits, setSplits] = useState<SplitRow[]>([newRow(originalDate)])
   const [appends, setAppends] = useState<AppendRow[]>([])
@@ -89,14 +99,49 @@ export function SplitOrderDialog({
   const remaining = (productId: string) =>
     (poolItems[productId] || 0) - allocated(productId)
 
-  // ── 追加用品項清單(該客戶曾訂購過的品項) ───────────
-  const appendableProducts = useMemo(
-    () => appendableProductIds
-      .map((pid) => products.find((p) => p.id === pid))
-      .filter((p): p is Product => !!p)
+  // ── 追加：分類各品項規則 ─────────────────────────
+  const appendableSet = useMemo(() => new Set(appendableProductIds), [appendableProductIds])
+
+  const allTubes = useMemo(
+    () => products
+      .filter((p) => p.category === 'tube' && p.is_active)
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
-    [appendableProductIds, products],
+    [products],
   )
+  const allCookies = useMemo(
+    () => products
+      .filter((p) => p.category === 'cookie' && p.is_active)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [products],
+  )
+
+  const existingCakes = useMemo(
+    () => products
+      .filter((p) => p.category === 'cake' && p.is_active && appendableSet.has(p.id))
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [products, appendableSet],
+  )
+  const existingTubes = useMemo(
+    () => allTubes.filter((p) => appendableSet.has(p.id)),
+    [allTubes, appendableSet],
+  )
+  const existingSingleCakes = useMemo(
+    () => products
+      .filter((p) => p.category === 'single_cake' && p.is_active && appendableSet.has(p.id))
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [products, appendableSet],
+  )
+  const existingCookies = useMemo(
+    () => allCookies.filter((p) => appendableSet.has(p.id)),
+    [allCookies, appendableSet],
+  )
+
+  const hasExistingCake = existingCakes.length > 0
+  const hasExistingTube = existingTubes.length > 0
+  const hasExistingSingleCake = existingSingleCakes.length > 0
+  const hasExistingCookie = existingCookies.length > 0
+
+  const tubePkgName = (id: string) => tubePackagingStyles.find((p) => p.id === id)?.name ?? ''
 
   // ── Split row helpers ────────────────────────────
   const updateRow = (rowId: string, patch: Partial<Pick<SplitRow, 'date'>>) =>
@@ -118,7 +163,7 @@ export function SplitOrderDialog({
     setSplits((prev) => (prev.length === 1 ? prev : prev.filter((r) => r.rowId !== rowId)))
 
   // ── Append row helpers ───────────────────────────
-  const updateAppendRow = (rowId: string, patch: Partial<Pick<AppendRow, 'date'>>) =>
+  const updateAppendRow = (rowId: string, patch: Partial<Pick<AppendRow, 'date' | 'newTubePackagingId'>>) =>
     setAppends((prev) => prev.map((r) => (r.rowId === rowId ? { ...r, ...patch } : r)))
 
   const updateAppendItem = (rowId: string, productId: string, qty: number) =>
@@ -141,8 +186,21 @@ export function SplitOrderDialog({
     const cleanedSplits: SplitInput[] = splits
       .map((s) => ({ date: s.date, items: { ...s.items } }))
       .filter((s) => s.date && Object.values(s.items).some((q) => q > 0))
+
     const cleanedAppends: AppendInput[] = appends
-      .map((a) => ({ date: a.date, items: { ...a.items } }))
+      .map((a) => {
+        const items = { ...a.items }
+        const tubeItemIds = Object.keys(items).filter(
+          (pid) => allTubes.some((t) => t.id === pid) && (items[pid] || 0) > 0,
+        )
+        let tubePackagingId: string | null = null
+        if (tubeItemIds.length > 0) {
+          tubePackagingId = hasExistingTube
+            ? (originalTubePackagingId || null)
+            : (a.newTubePackagingId || null)
+        }
+        return { date: a.date, items, tubePackagingId }
+      })
       .filter((a) => a.date && Object.values(a.items).some((q) => q > 0))
 
     if (cleanedSplits.length === 0 && cleanedAppends.length === 0) {
@@ -159,12 +217,34 @@ export function SplitOrderDialog({
       }
     }
 
-    // 追加白名單檢查
+    // 追加品項規則檢查
     for (const a of cleanedAppends) {
+      const tubeItemIds = Object.keys(a.items).filter(
+        (pid) => allTubes.some((t) => t.id === pid) && (a.items[pid] || 0) > 0,
+      )
+      // 原訂單沒有旋轉筒：每筆追加只能選一種口味、且必須選包裝
+      if (!hasExistingTube) {
+        if (tubeItemIds.length > 1) {
+          alert('原訂單沒有旋轉筒，每筆追加只能選一種旋轉筒口味')
+          return
+        }
+        if (tubeItemIds.length > 0 && !a.tubePackagingId) {
+          alert('追加新口味旋轉筒時必須選擇包裝款式')
+          return
+        }
+      }
+      // 各品項類別合法性：cake/single_cake 僅可追加原口味
       for (const pid of Object.keys(a.items)) {
-        if (!appendableProductIds.includes(pid)) {
-          const name = products.find((p) => p.id === pid)?.name ?? pid
-          alert(`「${name}」不在該客戶的歷史品項清單中,無法追加`)
+        if ((a.items[pid] || 0) <= 0) continue
+        const product = products.find((p) => p.id === pid)
+        if (!product) continue
+        const isExistingItem = appendableSet.has(pid)
+        if ((product.category === 'cake' || product.category === 'single_cake') && !isExistingItem) {
+          alert(`「${product.name}」無法追加：蜂蜜蛋糕/單入蛋糕僅可追加原訂單已有口味`)
+          return
+        }
+        if (product.category === 'tube' && hasExistingTube && !isExistingItem) {
+          alert(`「${product.name}」無法追加：原訂單已有旋轉筒，只可追加原口味`)
           return
         }
       }
@@ -283,59 +363,64 @@ export function SplitOrderDialog({
           {/* === 追加 section === */}
           <div className="space-y-3">
             <div className="text-xs font-semibold text-amber-700 border-b border-amber-200 pb-1">
-              追加 — 在新日期增加訂單(僅可選該客戶曾訂購過的品項)
+              追加 — 在新日期增加訂單
             </div>
             <p className="text-xs text-gray-500">
-              建立新日期訂單,品項數量為新增的量(不從原訂單扣減)。
-              {appendableProducts.length === 0
-                ? ' 該客戶尚無歷史品項,目前無法追加。'
-                : ` 可選品項共 ${appendableProducts.length} 種(來自客戶過去的訂單)。`}
+              建立新日期訂單(不從原訂單扣減)：原訂單已有品項可追加數量(沿用包裝/烙印)；
+              旋轉筒可追加新口味(每筆只能選一種 + 包裝)；曲奇可任意多選。
             </p>
 
-            {appendableProducts.length > 0 && (
-              <>
-                <div className="rounded-lg border bg-amber-50/40 p-3 space-y-1">
-                  <div className="text-xs font-semibold text-gray-700 mb-1">該客戶歷史品項清單</div>
-                  <div className="text-xs text-gray-600 leading-relaxed">
-                    {appendableProducts.map((p) => p.name).join('、')}
-                  </div>
-                </div>
+            <div className="space-y-3">
+              {appends.map((row, idx) => {
+                const tubeFilledIds = allTubes
+                  .filter((p) => (row.items[p.id] || 0) > 0)
+                  .map((p) => p.id)
+                const tubeAnyFilled = tubeFilledIds.length > 0
+                const showCookies = hasExistingCookie ? existingCookies : allCookies
+                const noCategoryAvailable =
+                  !hasExistingCake && !hasExistingSingleCake
+                  && existingTubes.length === 0 && allTubes.length === 0
+                  && showCookies.length === 0
 
-                <div className="space-y-3">
-                  {appends.map((row, idx) => (
-                    <div key={row.rowId} className="rounded-lg border p-3 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="shrink-0 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
-                          追加 {idx + 1}
-                        </span>
-                        <div className="flex-1">
-                          <Input
-                            type="date"
-                            value={row.date}
-                            onChange={(e) => updateAppendRow(row.rowId, { date: e.target.value })}
-                            className="h-8 text-sm"
-                          />
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          onClick={() => removeAppendRow(row.rowId)}
-                          className="shrink-0"
-                        >
-                          <XIcon className="size-3" />
-                        </Button>
+                return (
+                  <div key={row.rowId} className="rounded-lg border p-3 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="shrink-0 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                        追加 {idx + 1}
+                      </span>
+                      <div className="flex-1">
+                        <Input
+                          type="date"
+                          value={row.date}
+                          onChange={(e) => updateAppendRow(row.rowId, { date: e.target.value })}
+                          className="h-8 text-sm"
+                        />
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pl-1">
-                        {appendableProducts.map((p) => {
-                          const value = row.items[p.id] || 0
-                          return (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => removeAppendRow(row.rowId)}
+                        className="shrink-0"
+                      >
+                        <XIcon className="size-3" />
+                      </Button>
+                    </div>
+
+                    {/* 蜂蜜蛋糕：僅原訂單已有口味才開放 */}
+                    {hasExistingCake && (
+                      <div className="rounded-md bg-amber-50/40 p-2 space-y-1.5">
+                        <div className="text-xs font-semibold text-gray-700">
+                          蜂蜜蛋糕（沿用原訂單包裝/烙印）
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {existingCakes.map((p) => (
                             <div key={p.id} className="flex items-center gap-2">
                               <span className="text-xs text-gray-600 flex-1 truncate">{p.name}</span>
                               <Input
                                 type="number"
                                 min={0}
-                                value={value || ''}
+                                value={row.items[p.id] || ''}
                                 placeholder="0"
                                 onChange={(e) =>
                                   updateAppendItem(row.rowId, p.id, parseInt(e.target.value) || 0)
@@ -343,23 +428,154 @@ export function SplitOrderDialog({
                                 className="h-7 w-16 text-sm"
                               />
                             </div>
-                          )
-                        })}
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={addAppendRow}
-                    className="w-full border-amber-200 hover:bg-amber-50"
-                  >
-                    <PlusIcon className="mr-1 size-3" /> 新增追加日期
-                  </Button>
-                </div>
-              </>
-            )}
+                    )}
+
+                    {/* 旋轉筒：原訂單已有 → 限原口味；沒有 → 新口味單選 + 包裝 */}
+                    {hasExistingTube ? (
+                      <div className="rounded-md bg-amber-50/40 p-2 space-y-1.5">
+                        <div className="text-xs font-semibold text-gray-700">
+                          旋轉筒（沿用原訂單包裝，限原口味）
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {existingTubes.map((p) => (
+                            <div key={p.id} className="flex items-center gap-2">
+                              <span className="text-xs text-gray-600 flex-1 truncate">{p.name}</span>
+                              <Input
+                                type="number"
+                                min={0}
+                                value={row.items[p.id] || ''}
+                                placeholder="0"
+                                onChange={(e) =>
+                                  updateAppendItem(row.rowId, p.id, parseInt(e.target.value) || 0)
+                                }
+                                className="h-7 w-16 text-sm"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : allTubes.length > 0 && (
+                      <div className="rounded-md bg-amber-50/40 p-2 space-y-1.5">
+                        <div className="text-xs font-semibold text-gray-700">
+                          旋轉筒（選一種口味，其他反灰）
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {allTubes.map((p) => {
+                            const isThisFilled = tubeFilledIds.includes(p.id)
+                            const shouldDisable = tubeAnyFilled && !isThisFilled
+                            return (
+                              <div key={p.id} className="flex items-center gap-2">
+                                <span className={`text-xs flex-1 truncate ${shouldDisable ? 'text-gray-300' : 'text-gray-600'}`}>{p.name}</span>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  value={row.items[p.id] || ''}
+                                  placeholder="0"
+                                  disabled={shouldDisable}
+                                  onChange={(e) =>
+                                    updateAppendItem(row.rowId, p.id, parseInt(e.target.value) || 0)
+                                  }
+                                  className="h-7 w-16 text-sm"
+                                />
+                              </div>
+                            )
+                          })}
+                        </div>
+                        {tubeAnyFilled && (
+                          <div className="pt-1">
+                            <Select
+                              value={row.newTubePackagingId || undefined}
+                              onValueChange={(v) => v && updateAppendRow(row.rowId, { newTubePackagingId: v })}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="選擇包裝">
+                                  {row.newTubePackagingId ? tubePkgName(row.newTubePackagingId) : undefined}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {tubePackagingStyles.map((ps) => (
+                                  <SelectItem key={ps.id} value={ps.id}>{ps.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 單入蛋糕：僅原訂單已有口味才開放 */}
+                    {hasExistingSingleCake && (
+                      <div className="rounded-md bg-amber-50/40 p-2 space-y-1.5">
+                        <div className="text-xs font-semibold text-gray-700">
+                          單入蛋糕（沿用原訂單包裝/烙印）
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {existingSingleCakes.map((p) => (
+                            <div key={p.id} className="flex items-center gap-2">
+                              <span className="text-xs text-gray-600 flex-1 truncate">{p.name}</span>
+                              <Input
+                                type="number"
+                                min={0}
+                                value={row.items[p.id] || ''}
+                                placeholder="0"
+                                onChange={(e) =>
+                                  updateAppendItem(row.rowId, p.id, parseInt(e.target.value) || 0)
+                                }
+                                className="h-7 w-16 text-sm"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 曲奇：原訂單已有 → 限原組合；沒有 → 任意多選 */}
+                    {showCookies.length > 0 && (
+                      <div className="rounded-md bg-amber-50/40 p-2 space-y-1.5">
+                        <div className="text-xs font-semibold text-gray-700">
+                          曲奇{hasExistingCookie ? '（限原訂單品項）' : '（任意多選）'}
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {showCookies.map((p) => (
+                            <div key={p.id} className="flex items-center gap-2">
+                              <span className="text-xs text-gray-600 flex-1 truncate">{p.name}</span>
+                              <Input
+                                type="number"
+                                min={0}
+                                value={row.items[p.id] || ''}
+                                placeholder="0"
+                                onChange={(e) =>
+                                  updateAppendItem(row.rowId, p.id, parseInt(e.target.value) || 0)
+                                }
+                                className="h-7 w-16 text-sm"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {noCategoryAvailable && (
+                      <div className="rounded-md border border-dashed p-2 text-center text-xs text-gray-400">
+                        無可追加品項
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addAppendRow}
+                className="w-full border-amber-200 hover:bg-amber-50"
+              >
+                <PlusIcon className="mr-1 size-3" /> 新增追加日期
+              </Button>
+            </div>
           </div>
         </div>
 

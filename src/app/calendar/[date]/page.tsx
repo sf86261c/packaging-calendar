@@ -564,7 +564,7 @@ export default function DayOrderPage() {
         : null
     }
 
-    const buildOrderHeader = (date: string) => ({
+    const buildOrderHeader = (date: string, tubePackagingOverride?: string | null) => ({
       order_date: date,
       customer_name: formName.trim() || '未命名',
       status: formStatus || '待',
@@ -573,7 +573,9 @@ export default function DayOrderPage() {
       paid: formPaid,
       cake_packaging_id: formCakePackaging || null,
       cake_branding_id: formCakeBranding || null,
-      tube_packaging_id: formTubePackaging || null,
+      tube_packaging_id: tubePackagingOverride !== undefined
+        ? tubePackagingOverride
+        : (formTubePackaging || null),
       single_cake_packaging_id: null,
       single_cake_branding_text: formSingleCakeBranding || null,
     })
@@ -601,13 +603,33 @@ export default function DayOrderPage() {
     try {
       // 2. 建立分批 + 追加新訂單(都複製當前 form 的非品項欄位、都綁同 batch_group_id)
       //    分批會從原訂單品項池扣減,追加不會
-      const newOrderInfos: { id: string; date: string; itemEntries: [string, number][] }[] = []
-      const inserts: { date: string; items: Record<string, number>; kind: 'split' | 'append' }[] = [
+      //    追加訂單可帶 tubePackagingOverride（原訂單沒有旋轉筒時，用戶在追加 dialog 選的新包裝）
+      const newOrderInfos: {
+        id: string
+        date: string
+        itemEntries: [string, number][]
+        tubePackagingOverride?: string | null
+      }[] = []
+      const inserts: {
+        date: string
+        items: Record<string, number>
+        kind: 'split' | 'append'
+        tubePackagingOverride?: string | null
+      }[] = [
         ...splits.map((s) => ({ date: s.date, items: s.items, kind: 'split' as const })),
-        ...appends.map((a) => ({ date: a.date, items: a.items, kind: 'append' as const })),
+        ...appends.map((a) => ({
+          date: a.date,
+          items: a.items,
+          kind: 'append' as const,
+          tubePackagingOverride: a.tubePackagingId,
+        })),
       ]
       for (const req of inserts) {
-        const ins = await supabase.from('orders').insert(buildOrderHeader(req.date)).select('id').single()
+        const ins = await supabase
+          .from('orders')
+          .insert(buildOrderHeader(req.date, req.tubePackagingOverride))
+          .select('id')
+          .single()
         if (ins.error || !ins.data) {
           throw new Error(`建立${req.kind === 'split' ? '分批' : '追加'}訂單失敗：${ins.error?.message ?? 'no data'}`)
         }
@@ -621,6 +643,7 @@ export default function DayOrderPage() {
           id: newId,
           date: req.date,
           itemEntries: Object.entries(req.items).filter(([, q]) => q > 0),
+          tubePackagingOverride: req.tubePackagingOverride,
         })
       }
 
@@ -671,14 +694,18 @@ export default function DayOrderPage() {
       const allMissingTubePkg = [...missOrig]
       const allMissingCombos = [...origMat.missingCombos]
       for (const info of newOrderInfos) {
+        // append 訂單若帶 override 則用之；split 訂單沿用 formTubePackaging
+        const tubeForCalc = info.tubePackagingOverride === undefined
+          ? (formTubePackaging || undefined)
+          : (info.tubePackagingOverride || undefined)
         const { deductions: ingr, missingTubePkg: missN } = calculateDeductions(
           info.itemEntries,
-          formTubePackaging || undefined,
+          tubeForCalc,
         )
         const mat = calculateMaterialDeductions(
           info.itemEntries,
           formCakePackaging || undefined,
-          formTubePackaging || undefined,
+          tubeForCalc,
           formSingleCakePackaging,
         )
         await replaceOrderInventory(supabase, info.id, ingr, mat.deductions, info.date)
@@ -1481,6 +1508,10 @@ export default function DayOrderPage() {
           }
           return [...ids]
         })()}
+        tubePackagingStyles={packagingStyles
+          .filter((ps: any) => ps.category === 'tube' && ps.is_active)
+          .map((ps: any) => ({ id: ps.id, name: ps.name }))}
+        originalTubePackagingId={formTubePackaging || null}
         products={products as import('@/lib/types').Product[]}
         onConfirm={handleSplitConfirm}
       />

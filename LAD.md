@@ -426,6 +426,56 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-04-28 — 追加訂單品項規則細化（按類別差異化）
+
+**需求**：原「追加」只能選該客戶歷史品項，太過嚴格。要支援不同類別不同規則：
+- 蜂蜜蛋糕：原訂單已有口味才能追加（沿用包裝/烙印）
+- 旋轉筒：原訂單已有 → 限原口味；原訂單沒有 → 可加新口味，但每筆只能選一種 + 包裝
+- 單入蛋糕：原訂單已有口味才能追加（沿用包裝/烙印）
+- 曲奇：原訂單有 → 限原組合；原訂單沒有 → 任意多選
+
+**設計**
+
+1. **SplitOrderDialog 追加 section 重寫**
+   - 移除舊的「該客戶歷史品項清單」單一 list 與單一 grid 輸入
+   - 改為按類別分四個 sections（cake / tube / single_cake / cookie），每個 section 規則不同
+   - 旋轉筒「選一種其他反灰」：當該追加 row 已有某口味數量 > 0，其他口味 input `disabled` 且文字 `text-gray-300`
+   - 旋轉筒新口味追加時顯示包裝下拉（從 `tubePackagingStyles` 帶入）
+
+2. **AppendInput 介面擴充**
+   - 加 `tubePackagingId?: string | null` — effective 旋轉筒包裝（confirm 時根據規則計算填入）
+   - 規則：原訂單有旋轉筒 → 沿用 `originalTubePackagingId`；沒有 → 用追加 dialog 中選的；無旋轉筒品項 → null
+
+3. **Validation**
+   - 原訂單沒有旋轉筒 + 該 row 多於一個口味 → alert
+   - 原訂單沒有旋轉筒 + 該 row 有口味 + 沒選包裝 → alert
+   - 蜂蜜蛋糕/單入蛋糕：非原訂單品項 → alert（UI 已限制，雙保險）
+   - 原訂單已有旋轉筒 + 非原口味 → alert
+
+4. **handleSplitConfirm: tube_packaging_id override**
+   - `buildOrderHeader(date, tubePackagingOverride?)` 加可選參數
+   - splits 不傳（沿用 `formTubePackaging`）
+   - appends 傳 `a.tubePackagingId`（SplitOrderDialog confirm 時已計算為 effective 值）
+   - inventory 計算迴圈也按 override 計算扣減：split 用 `formTubePackaging`、append 用 override
+
+**取捨**
+- 沒在 `[date]/page.tsx` 重複 `hasExistingTube` 判斷：把判斷與 effective `tube_packaging_id` 計算都放在 SplitOrderDialog confirm 階段，page.tsx 只用結果
+- `single_cake` 與 `cake` 的「原口味」限制由 UI（只渲染 `existingXxx`）+ confirm validation 雙保險
+- 曲奇沒有包裝/烙印，單純根據 `hasExistingCookie` 切換顯示範圍
+
+**新增的 SplitOrderDialog props**
+- `tubePackagingStyles: { id: string; name: string }[]` — 旋轉筒包裝下拉選項
+- `originalTubePackagingId?: string | null` — 原訂單的 `tube_packaging_id`（繼承用）
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| 追加 section 完整重寫 + 新 derived consts + validation + AppendInput 擴充 | `src/components/split-order-dialog.tsx` |
+| SplitOrderDialog 呼叫處加新 props + handleSplitConfirm 加 tube override + inventory 計算用 override | `src/app/calendar/[date]/page.tsx` |
+
+---
+
 ### 2026-04-28 — 新增訂單同名客戶偵測 +「非相同客戶」確認
 
 **需求**：避免使用者在新增訂單時把與同名同姓既有客戶的訂單建成獨立訂單，導致「分批/追加」UI 上的兄弟批次連動錯亂。
