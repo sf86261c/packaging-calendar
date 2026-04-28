@@ -951,7 +951,7 @@ export default function DayOrderPage() {
                             <button
                               type="button"
                               onClick={() => handlePaidToggle(order.id, !order.paid)}
-                              className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                              className={`rounded-full px-2 py-0.5 text-xs font-medium transition-colors ${
                                 order.paid
                                   ? 'bg-green-100 text-green-700 hover:bg-green-200'
                                   : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
@@ -979,7 +979,7 @@ export default function DayOrderPage() {
                           <TableCell>
                             <div className="flex flex-wrap gap-1">
                               {order.items.map((item, idx) => (
-                                <Badge key={idx} variant="secondary" className="text-[10px] px-1.5 py-0">
+                                <Badge key={idx} variant="secondary" className="text-xs px-1.5 py-0">
                                   {item.name.replace('旋轉筒-', '🫙').replace('單入-', '📦')} x{item.quantity}
                                 </Badge>
                               ))}
@@ -988,7 +988,7 @@ export default function DayOrderPage() {
                           <TableCell className="hidden md:table-cell">
                             <div className="flex flex-wrap gap-1">
                               {orderMeta(order).map((m, i) => (
-                                <Badge key={i} variant="outline" className="text-[10px] px-1 py-0">{m}</Badge>
+                                <Badge key={i} variant="outline" className="text-xs px-1 py-0">{m}</Badge>
                               ))}
                               {orderMeta(order).length === 0 && <span className="text-xs text-gray-300">-</span>}
                             </div>
@@ -1010,7 +1010,7 @@ export default function DayOrderPage() {
                             className={`hover:bg-transparent ${order.printed ? 'bg-yellow-50' : 'bg-gray-50/40'}`}
                           >
                             <TableCell colSpan={7} className="py-1.5 px-3">
-                              <div className="text-[10px] text-gray-400 leading-relaxed">
+                              <div className="text-xs text-gray-400 leading-relaxed">
                                 <span className="text-gray-500 mr-2">↳ 同客戶其他批次:</span>
                                 {siblings.map((s, i) => (
                                   <span key={s.orderId} className="inline-flex items-center mr-3">
