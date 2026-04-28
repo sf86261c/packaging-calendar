@@ -15,7 +15,7 @@
 | 前端 | Next.js 16 (App Router) + TypeScript |
 | UI | Tailwind CSS 4 + shadcn/ui (@base-ui/react) |
 | 資料庫 | Supabase (PostgreSQL) + RLS（開放 anon 讀寫） |
-| 認證 | 無（公開內部工具，打開即可操作） |
+| 認證 | 自建帳密（pgcrypto bcrypt + RPC SECURITY DEFINER + localStorage session 10h 自動到期） |
 | 部署 | Vercel (Hobby plan, 自動 CI/CD) |
 | 圖表 | Recharts 3.8 |
 | 即時同步 | Supabase Realtime |
@@ -26,12 +26,20 @@
 
 | 頁面 | 路由 | 狀態 | 說明 |
 |------|------|------|------|
-| 月曆視圖 | `/calendar` | ✅ 完成 | 月份切換、每日訂單摘要、Realtime、響應式、**日期卡右上角 + 鈕快速新增訂單**（共用 `OrderFormDialog`）、**未來 4 天內含未列印訂單的卡片粉紅警示 + 呼吸燈 badge** |
+| 月曆視圖 | `/calendar` | ✅ 完成 | 月份切換、每日訂單摘要、Realtime、響應式、**日期卡右上角 + 鈕快速新增訂單**（共用 `OrderFormDialog`）、**未來 4 天內含未列印訂單的卡片粉紅警示 + 呼吸燈 badge**、**右上角 inline 搜尋框 + 即時 popover 結果列表（debounce 180ms）** |
 | 日訂單管理 | `/calendar/[date]` | ✅ 完成 | 新增/編輯/刪除（**編輯時可改訂單日期**）、**付款狀態欄位（列表可一鍵切換 + 編輯 dialog 下拉）**、**分批/追加（複製訂單到多個日期、原訂單品項自動扣減、自動編號 batch_info）**、**資料驅動庫存扣減（product_recipe）**、CSV匯出、Realtime、**今日試吃/耗損/散單 CRUD** |
-| 客戶搜尋 | `/search` | ✅ 完成 | 即時搜尋(ilike)、點擊跳轉日期頁 |
+| 客戶搜尋 | `/search` | ✅ 完成 | 即時搜尋(ilike)、點擊跳轉日期頁；支援 `?q=` URL 預填（從月曆右上搜尋框跳轉而來） |
 | 統計儀表板 | `/dashboard` | ✅ 完成 | 6 統計卡片 + 5 Recharts 圖表（含試吃統計） |
 | 庫存總覽 | `/inventory` | ✅ 完成 | **整合產品庫存 + 包材庫存於同頁**：蜂蜜蛋糕（條）/ 旋轉筒包裝 / 曲奇 / 包材；**每項依 own `lead_time_days` 計算 D+N 預計庫存**；安全庫存與到貨時間 inline 可編輯；**曲奇可整批隱藏（隱藏時不列入叫貨通知）**；包材 CRUD/入庫/停用；產品入庫；LINE 叫貨通知；Realtime |
-| 設定 | `/settings` | ✅ 完成 | 產品/包裝/烙印 CRUD、**新增產品可同步設定原料配方與包材消耗**、每項產品可📋編輯配方 |
+| 操作紀錄 | `/activity` | ✅ 完成 | 表格化顯示最近 500 筆寫入操作：日期/時間/操作者/客戶/改動項目/詳情；mount 時順手清理 >30 天紀錄；支援帳號/動作/客戶篩選 |
+| 設定 | `/settings` | ✅ 完成（admin only） | 產品/包裝/烙印 CRUD、**新增產品可同步設定原料配方與包材消耗**、每項產品可📋編輯配方；**僅 admin 可進入**（非 admin 顯示無權限卡片） |
+| 登入/註冊 | `/login` | ✅ 完成 | 單頁 toggle sign-in / sign-up；已登入自動跳 `/calendar`；註冊自動登入 |
+
+**全域 auth 行為**：
+- 任何受保護頁面在未登入時自動跳 `/login`
+- Session 10 小時固定到期（非 idle timeout），到時自動登出 + 寫紀錄
+- 不存在路由 → 已登入跳 `/calendar`、未登入跳 `/login`（不顯示 Next.js 預設 404）
+- 預設管理員：`admin / admin888`（可在 Supabase Dashboard `app_users` 表追加其他人）
 
 ### 產品結構
 
@@ -417,6 +425,160 @@ ALTER TABLE stock_adjustments
 ```
 
 ## 變更紀錄
+
+### 2026-04-28 — 帳號系統強化（session 過期、全域 guard、操作紀錄中文化、404 導向）
+
+承續同日「帳號系統 + 操作紀錄 + 設定頁 admin guard」初版，後續補上多項細節：
+
+**1. 未登入強制跳轉（全 app guard）**
+- AppShell 加 `useEffect` 偵測 `mounted && !user && !isLoginPage` → `router.replace('/login')`
+- 未登入訪問任何受保護頁面（calendar / dashboard / inventory / activity / settings）都會被攔截
+- 過渡期顯示「驗證中...」中性畫面，避免閃過受保護內容
+- DB 安全仍由 RLS 把關，但 UX 層完全擋住匿名操作
+
+**2. Session 10 小時固定到期自動登出**
+- localStorage 結構從 `AuthUser` 改為 `StoredSession`：多一個 `expiresAt` 欄位
+- `signIn / signUp` 寫入時設 `expiresAt = Date.now() + 10h`
+- `readUser` 讀取時檢查過期 → 過期清掉 storage + 回傳 null
+- AppShell 加 `setTimeout` 在 `expiresAt` 到時自動 `signOut + replace('/login')` 並寫「自動登出」紀錄（reason: Session 10 小時到期）
+- 固定時長（非 idle timeout）：避免同電腦不同人接手時混淆紀錄
+
+**3. 已登入訪問 `/login` → 自動跳 `/calendar`**
+- LoginPage 加 `useEffect` 偵測 `mounted && user` → `router.replace('/calendar')`
+- 過渡期顯示「驗證中...」避免閃過表單
+
+**4. 不存在路由優雅導向**
+- 新增 `src/app/not-found.tsx`：依登入狀態 redirect
+  - 已登入 → `/calendar`
+  - 未登入 → `/login`
+- 取代 Next.js 預設 404 錯誤頁
+
+**5. 修復 React error #185（Maximum update depth）**
+- 原 `readUser` 每次 `JSON.parse` 都回新物件 reference
+- `useSyncExternalStore` 認為 store 一直在變 → 無限 re-render → 跳轉迴圈 → 頁面崩潰
+- 修法：module-level cache `cachedRaw / cachedUser / cachedExpiresAt`，只在 raw localStorage 字串變動時 re-parse；回傳同一 reference
+
+**6. Migration 026 — 修正 pgcrypto search_path**
+- Supabase 把 pgcrypto 安裝在 `extensions` schema
+- Migration 024 的 RPC `SET search_path = public` 蓋掉預設 → 註冊報錯 `gen_salt(unknown) does not exist`
+- 修法：CREATE OR REPLACE function 把 search_path 改為 `public, extensions`
+
+**7. 操作紀錄全面正體中文化 + 動作細分**
+
+紀錄頁從卡片改表格化：日期 / 時間 / 操作者 / 客戶 / 改動項目 / 詳情。
+
+訂單動作根據實際變動細分（OrderFormDialog handleSave 比對前後值）：
+
+| 情境 | action |
+|---|---|
+| 新增訂單 | `新增訂單` |
+| 編輯訂單只改 `order_date` | `改日期`（含 `原日期` metadata） |
+| 編輯訂單只改 items | `改數量`（含 `原品項` metadata） |
+| 編輯訂單兩者都改 | `改日期+改數量` |
+| 編輯訂單只改其他欄位（付款/狀態/包裝） | `編輯訂單` |
+| 刪除訂單 | `刪除訂單` |
+| 列印切換 | `列印訂單` / `取消列印` |
+| 付款切換 | `標記已付款` / `標記未付款` |
+| 分批訂單 / 追加訂單 | `分批訂單` / `追加訂單`（含分批/追加日期清單） |
+| 試吃/耗損/散單 | `新增/編輯/刪除${類型}紀錄` |
+| 設定 CRUD | `新增/編輯/啟用/停用 + 產品/包裝/烙印/常用` |
+| 帳號操作 | `登入 / 登出 / 自動登出 / 註冊帳號` |
+
+metadata key 全中文：`客戶 / 日期 / 原日期 / 付款狀態 / 品項 / 原品項 / 類別 / 類型 / 帳號 / 原因` 等。
+
+**8. 訂單紀錄詳情顯示實際品項**
+- 取消「品項總數」（只顯示總和），改為「品項」列出 `品名 ×數量、品名 ×數量`（用全形頓號分隔）
+- 編輯訂單若品項有變動，多帶「原品項」顯示變動前明細
+- `付款` key 改為 `付款狀態`，值用中文（已付款/未付款）
+
+**變更檔案（這一輪）**
+
+| 變更 | 檔案 |
+|---|---|
+| Migration 026（pgcrypto search_path 修正） | `supabase/migrations/026_fix_auth_search_path.sql`（新增） |
+| auth localStorage 結構加 expiresAt + cache reference 修 infinite loop + getSessionExpiresAt | `src/lib/auth.ts` |
+| AppShell 全域 guard + 10h session timer + 自動登出 logActivity | `src/components/app-shell.tsx` |
+| LoginPage 已登入跳 /calendar + 中文 logActivity（註冊帳號 / 登入） | `src/app/login/page.tsx` |
+| 不存在路由處理 | `src/app/not-found.tsx`（新增） |
+| 操作紀錄頁改表格化 + pickCustomer / formatDetail helper | `src/app/activity/page.tsx` |
+| 訂單動作細分 + metadata 中文化 + 列出實際品項 | `src/components/order-form-dialog.tsx` |
+| 訂單刪除/列印/付款/分批/追加/試吃耗損 中文 action 與 metadata | `src/app/calendar/[date]/page.tsx` |
+| 設定 CRUD 中文 action 與 metadata | `src/app/settings/page.tsx` |
+
+**Migration（待 Dashboard 執行）**
+- `026_fix_auth_search_path.sql` — 未執行前 sign_up / sign_in 都會回 `gen_salt(unknown) does not exist`，註冊登入完全失敗
+
+---
+
+### 2026-04-28 — 月曆即時搜尋 + 全域暖色配色 + UI 字體放大
+
+**1. 搜尋入口從側邊欄移到月曆右上**
+- AppShell `navItems` 移除「搜尋」項目（檔案內 import 也刪掉 Search icon）
+- 月曆頁 `<` 前一月按鈕左邊插入 inline 搜尋框：Search icon + Input + form
+- 保留 `/search` 路由：搜尋頁仍存在（直接 URL 訪問仍可用，提供完整列表 + 編輯功能）
+
+**2. 即時搜尋（debounce + popover）**
+- `searchQuery` onChange 不用按 Enter 即觸發；`useEffect` 觀察 query 變動 180ms 後執行 `ilike '%q%'`
+- 結果在搜尋框下方絕對定位浮動顯示前 10 筆（客戶名 / 日期 / 品項 / 列印付款狀態）
+- 點結果 → `router.push('/calendar/${date}')`（不離開月曆 layout）
+- 點外部或 ESC → 關閉 popover
+- 結果 ≥ 10 筆 → 顯示「查看完整結果 →」按鈕跳到 `/search?q=`
+- 保留按 Enter 跳完整結果頁的 fallback
+- search 頁 mount 時讀 `window.location.search` 的 `?q=` 預填並自動執行搜尋
+
+**3. 全域暖色配色**
+
+`:root` variables 改為 oklch 暖色系（hue 50-85，米黃→淺橘）：
+
+| 變數 | 舊值（純灰階） | 新值（暖色） |
+|---|---|---|
+| `--background` | `oklch(1 0 0)` | `oklch(0.97 0.018 85)` |
+| `--foreground` | `oklch(0.145 0 0)` | `oklch(0.22 0.015 50)` |
+| `--card` | `oklch(1 0 0)` | `oklch(0.99 0.012 85)` |
+| `--primary` | `oklch(0.205 0 0)` | `oklch(0.32 0.05 50)` |
+| `--accent` | `oklch(0.97 0 0)` | `oklch(0.91 0.028 75)` |
+| `--ring` | `oklch(0.708 0 0)` | `oklch(0.65 0.06 60)` |
+| sidebar 系列 | 純灰 | 比 background 略深的暖色 |
+
+對比：background L=0.97 vs foreground L=0.22 → 約 7:1，閱讀無壓力。
+
+**4. AppShell 硬編碼 gray 全部改 theme-aware**
+- `bg-gray-50/white` → `bg-background/sidebar`
+- `text-gray-XXX` → `text-foreground/muted-foreground`
+- `border-gray-200` → `border-sidebar-border`
+- `bg-blue-50 text-blue-700`（active nav）→ `bg-accent text-accent-foreground`
+
+**5. 整體字體與間距放大 1.3 倍**
+- `globals.css` 加 `html { font-size: 130% }`
+- Tailwind 4 用 rem 為基底，root font-size 變化 → 所有 `text-sm`、`p-4`、`w-20`、`h-8` 全部按比例放大
+- 不影響 `px` 寫死的 icon 大小、border 厚度
+
+**6. Dialog 標題與欄位重疊修正（1.3x 環境下）**
+- `DialogContent`：`gap-4` → `gap-6` + `pt-5`（標題上方留白）
+- `DialogTitle`：`leading-none` → `leading-tight`（給標題自身行高）
+- `DialogHeader`：加 `pr-8` 避免長標題被右上角 X 鈕遮到
+
+**7. Label 加粗 + 拉開與下方 Input 距離**
+- `font-medium` → `font-semibold`
+- `leading-none` → `leading-tight`
+- 加 `mb-1.5`
+
+**8. 訂單列表內 4 處字體放大（rem-based 跟著 1.3x scale）**
+- 付款 pill / 品項 badge / 包裝烙印 badge / 同客戶其他批次：`text-[10px]`（固定 px，不受 html scale 影響） → `text-xs`（0.75rem，約 1.56x）
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| 暖色 :root variables + html 130% | `src/app/globals.css` |
+| AppShell theme-aware classes + 移除側邊欄搜尋 | `src/components/app-shell.tsx` |
+| 月曆頁 inline 搜尋框 + debounce + popover | `src/app/calendar/page.tsx` |
+| search 頁讀 ?q= 預填 | `src/app/search/page.tsx` |
+| Dialog 三處間距修正 | `src/components/ui/dialog.tsx` |
+| Label 加粗 | `src/components/ui/label.tsx` |
+| 訂單列表 4 處 text-xs | `src/app/calendar/[date]/page.tsx` |
+
+---
 
 ### 2026-04-28 — 帳號系統 + 操作紀錄 + 設定頁 admin guard
 
