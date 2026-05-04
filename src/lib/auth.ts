@@ -3,10 +3,16 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { createClient } from '@/lib/supabase'
 
+export type PageRoute = 'calendar' | 'dashboard' | 'inventory' | 'activity' | 'settings'
+export type PageMode = 'none' | 'view' | 'edit' | 'adjustment_only'
+
+export type UserPermissions = Partial<Record<PageRoute, PageMode>>
+
 export interface AuthUser {
   id: string
   username: string
   is_admin: boolean
+  permissions: UserPermissions
 }
 
 const STORAGE_KEY = 'packaging-calendar:auth'
@@ -16,7 +22,48 @@ interface StoredSession {
   id: string
   username: string
   is_admin: boolean
+  permissions: UserPermissions
   expiresAt: number
+}
+
+// ─── Permission helpers ────────────────────────────────────────────
+// is_admin → 永遠所有頁面 edit、永遠可用試吃/耗損/散單
+// 否則查 permissions[page]：
+//   - 'none' / 缺值（預設）→ 看不到
+//   - 'view' → 可看，不可改
+//   - 'edit' → 完整
+//   - 'adjustment_only' → calendar 限定，僅顯示「試吃/耗損/散單」按鈕
+
+const DEFAULT_NON_ADMIN_MODE: PageMode = 'none'
+
+export function getPageMode(user: AuthUser | null, page: PageRoute): PageMode {
+  if (!user) return 'none'
+  if (user.is_admin) return 'edit'
+  return user.permissions?.[page] ?? DEFAULT_NON_ADMIN_MODE
+}
+
+export function canAccessPage(user: AuthUser | null, page: PageRoute): boolean {
+  return getPageMode(user, page) !== 'none'
+}
+
+export function canEditPage(user: AuthUser | null, page: PageRoute): boolean {
+  return getPageMode(user, page) === 'edit'
+}
+
+export function canViewPage(user: AuthUser | null, page: PageRoute): boolean {
+  const m = getPageMode(user, page)
+  return m === 'view' || m === 'edit'
+}
+
+// 月曆頁的「試吃/耗損/散單」按鈕：edit 與 adjustment_only 兩種模式都可用
+export function canUseStockAdjustment(user: AuthUser | null): boolean {
+  const m = getPageMode(user, 'calendar')
+  return m === 'edit' || m === 'adjustment_only'
+}
+
+// 月曆頁的訂單操作（CRUD、進入日頁面）：只有 edit 才行
+export function canUseCalendarOrders(user: AuthUser | null): boolean {
+  return getPageMode(user, 'calendar') === 'edit'
 }
 
 // ─── Pub/sub for cross-component reactive updates ───
@@ -79,6 +126,7 @@ function readUser(): AuthUser | null {
         id: parsed.id,
         username: parsed.username,
         is_admin: parsed.is_admin,
+        permissions: (parsed.permissions ?? {}) as UserPermissions,
       }
     } else {
       cachedUser = null
@@ -150,6 +198,15 @@ export function useCurrentUserClient(): { user: AuthUser | null; mounted: boolea
 
 // ─── Operations ───
 
+function normalizeAuthUser(raw: Record<string, unknown>): AuthUser {
+  return {
+    id: raw.id as string,
+    username: raw.username as string,
+    is_admin: !!raw.is_admin,
+    permissions: ((raw.permissions ?? {}) as UserPermissions),
+  }
+}
+
 export async function signIn(username: string, password: string): Promise<AuthUser> {
   const supabase = createClient()
   const { data, error } = await supabase.rpc('sign_in', {
@@ -158,9 +215,9 @@ export async function signIn(username: string, password: string): Promise<AuthUs
   })
   if (error) throw new Error(`登入失敗：${error.message}`)
   if (!data || data.length === 0) {
-    throw new Error('帳號或密碼錯誤')
+    throw new Error('帳號或密碼錯誤、或帳號已停用')
   }
-  const user = data[0] as AuthUser
+  const user = normalizeAuthUser(data[0])
   writeUser(user)
   return user
 }
@@ -175,7 +232,7 @@ export async function signUp(username: string, password: string): Promise<AuthUs
   if (!data || data.length === 0) {
     throw new Error('註冊失敗：未取得帳號資訊')
   }
-  const user = data[0] as AuthUser
+  const user = normalizeAuthUser(data[0])
   writeUser(user)
   return user
 }

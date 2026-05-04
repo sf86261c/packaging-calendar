@@ -11,23 +11,36 @@ import {
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { DraggableCat } from '@/components/draggable-cat'
-import { useCurrentUserClient, signOut, getSessionExpiresAt, type AuthUser } from '@/lib/auth'
+import {
+  useCurrentUserClient, signOut, getSessionExpiresAt,
+  canAccessPage, type AuthUser, type PageRoute,
+} from '@/lib/auth'
 import { logActivity } from '@/lib/activity'
 
 interface NavItem {
   href: string
+  page: PageRoute
   label: string
   icon: typeof Calendar
-  adminOnly?: boolean
 }
 
 const navItems: NavItem[] = [
-  { href: '/calendar', label: '月曆', icon: Calendar },
-  { href: '/dashboard', label: '統計', icon: BarChart3 },
-  { href: '/inventory', label: '庫存', icon: Package },
-  { href: '/activity', label: '紀錄', icon: ScrollText },
-  { href: '/settings', label: '設定', icon: Settings, adminOnly: true },
+  { href: '/calendar', page: 'calendar', label: '月曆', icon: Calendar },
+  { href: '/dashboard', page: 'dashboard', label: '統計', icon: BarChart3 },
+  { href: '/inventory', page: 'inventory', label: '庫存', icon: Package },
+  { href: '/activity', page: 'activity', label: '紀錄', icon: ScrollText },
+  { href: '/settings', page: 'settings', label: '設定', icon: Settings },
 ]
+
+// pathname → PageRoute 映射，用於 URL guard
+function pathToPage(pathname: string): PageRoute | null {
+  if (pathname.startsWith('/calendar')) return 'calendar'
+  if (pathname.startsWith('/dashboard')) return 'dashboard'
+  if (pathname.startsWith('/inventory')) return 'inventory'
+  if (pathname.startsWith('/activity')) return 'activity'
+  if (pathname.startsWith('/settings')) return 'settings'
+  return null
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -44,6 +57,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       router.replace('/login')
     }
   }, [mounted, user, isPublicPage, router])
+
+  // 權限 guard：登入後若 URL 對應頁面 = none → 重導到第一個可進入的頁面
+  useEffect(() => {
+    if (!mounted || !user || isPublicPage) return
+    const targetPage = pathToPage(pathname)
+    if (!targetPage) return
+    if (canAccessPage(user, targetPage)) return
+    // 找第一個可進入的頁面
+    const fallback = navItems.find(n => canAccessPage(user, n.page))
+    if (fallback) {
+      router.replace(fallback.href)
+    } else {
+      // 完全沒有頁面權限 → 強制登出
+      signOut()
+      router.replace('/login')
+    }
+  }, [mounted, user, pathname, isPublicPage, router])
 
   // Session 10 小時固定到期：在到期時間自動登出 + 跳 login
   // 不會因為頁面切換而 reset（AppShell 是 layout 級別，不會 unmount）
@@ -86,7 +116,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     )
   }
 
-  const visibleNav = navItems.filter((item) => !item.adminOnly || user.is_admin)
+  const visibleNav = navItems.filter((item) => canAccessPage(user, item.page))
 
   const handleSignOut = async () => {
     await logActivity('登出', `user:${user.id}`, { 帳號: user.username })
