@@ -247,6 +247,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `028_packaging_material_categories.sql` | 新增包材分類表 + packaging_materials.category_id（自訂分類區塊用） |
 | `029_deactivate_tube_pkg.sql` | 停用 tube_pkg 三筆產品（四季童話 / 銀河探險 / 樂園馬戲），改由 product_material_usage 接手包裝消耗 |
 | `030_packaging_materials_sort_order.sql` | packaging_materials 加 sort_order 欄位，初始按 name 排序（10/20/30...）|
+| `031_app_users_permissions.sql` | app_users 加 permissions JSONB + is_active；管理 RPC（admin_list/create/update/reset_password/delete），sign_in 加 is_active 檢查並回傳 permissions |
 
 ## 檔案結構
 
@@ -430,6 +431,81 @@ ALTER TABLE stock_adjustments
 ```
 
 ## 變更紀錄
+
+### 2026-05-04 — 帳號權限系統（per-page mode + 使用者管理 UI）
+
+**需求**：在網頁上管理使用者帳號，並設定每個帳號可查看/操作哪些頁面。特殊情境：「只能操作試吃/耗損/散單」的門市帳號。
+
+**設計**
+
+- **權限模型**：`PageMode = 'none' | 'view' | 'edit' | 'adjustment_only'`，per-page 分配
+  - `none`：nav 不顯示、URL 直連也擋（redirect 第一個可進入頁面）
+  - `view`：可看，但寫入按鈕隱藏
+  - `edit`：完整權限
+  - `adjustment_only`：calendar 限定，月曆畫面只顯示一個大「🍰 試吃/耗損/散單/門市銷售」按鈕，其他全隱藏（門市帳號用）
+  - `is_admin = TRUE` 永遠覆蓋成全頁面 edit
+- **儲存**：`app_users.permissions JSONB`，例如：
+  ```json
+  {"calendar":"adjustment_only","dashboard":"none","inventory":"none","activity":"none","settings":"none"}
+  ```
+- **預設角色 preset**（settings UI 一鍵套用）：
+  - 管理員（is_admin = true）
+  - 操作員（calendar/inventory edit, dashboard/activity view, settings none）
+  - 檢視者（全頁面 view）
+  - 門市/試吃only（calendar=adjustment_only, 其他 none）
+
+**Migration 031**
+- `app_users.permissions JSONB DEFAULT '{}'`、`is_active BOOLEAN DEFAULT TRUE`
+- 5 支 SECURITY DEFINER 管理 RPC：`admin_list_users / admin_create_user / admin_update_user / admin_reset_password / admin_delete_user`
+  - 共同 guard：呼叫者必須 `is_admin AND is_active`（透過 `_assert_caller_admin` helper）
+  - 防止對自己「降級 / 停用 / 刪除」造成自鎖
+- `sign_in` 重簽：加 `is_active = TRUE` 檢查 + 回傳 `permissions`
+
+**auth.ts**
+- `AuthUser` 加 `permissions: UserPermissions`
+- `localStorage` session schema 加 `permissions`
+- helpers：`getPageMode / canAccessPage / canEditPage / canViewPage / canUseStockAdjustment / canUseCalendarOrders`
+- `is_admin` 走捷徑回傳 `'edit'`
+
+**AppShell**
+- `navItems` 不再用 `adminOnly` flag，改 `canAccessPage(user, page)` 過濾
+- 新增 URL guard：登入後若目前 pathname 對應頁面 = `none` → 重導第一個可進入頁面；無任何頁面權限 → signOut + /login
+
+**月曆頁 adjustment_only 模式**
+- 進頁面後 early return 一個極簡畫面：標題、說明文字、一顆大按鈕觸發 `StockAdjustmentDialog`，無月曆 grid、無搜尋
+- 一般 mode 下：「🍰 試吃/耗損/散單」按鈕用 `canAdjust` gate；日期卡 `+` 鈕用 `canEditOrders` gate
+
+**設定頁使用者管理 section**（admin only）
+- 表格列出所有 `app_users`（透過 `admin_list_users` RPC）：帳號 / 角色 / 啟用狀態 / 操作（編輯 / 重設密碼 / 刪除）
+- 新增帳號 dialog：username + password + 角色 preset 快捷 + per-page mode 下拉
+- 編輯帳號 dialog：is_admin 切換 + 啟用 toggle（不能停用自己） + per-page 下拉
+- 重設密碼 dialog
+- 角色 label 自動推斷（管理員 / 操作員 / 檢視者 / 門市試吃only / 自訂）
+
+**未做（後續可細化）**
+- 「view」mode 下日頁面 / 庫存頁等寫入按鈕的逐個 gate（目前主要靠 nav + URL guard 以及月曆頁的 + 鈕 / 試吃按鈕做基礎防線）
+- 動作 / 欄位層級權限（例如「可看訂單但不可看付款狀態」）
+
+**取捨**
+- per-page mode + 4 種值滿足 95% 場景，UI 不會被細粒度權限淹沒
+- adjustment_only 直接 hard-code 在月曆頁 early return：簡單且效果明顯，未來若有別的「特定按鈕」需求再考慮 generic feature flag
+- 管理 RPC 用 `p_caller_id` 驗證（不傳密碼）：與既有 client-side 信任設計一致；anon key 是公開但團隊內部使用
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| Migration 031（待 Dashboard 執行） | `supabase/migrations/031_app_users_permissions.sql`（新增） |
+| AuthUser permissions + helpers | `src/lib/auth.ts` |
+| nav 過濾 + URL guard | `src/components/app-shell.tsx` |
+| adjustment_only mode + + 鈕/試吃按鈕 gate | `src/app/calendar/page.tsx` |
+| 使用者管理 UI（state + handlers + dialogs） | `src/app/settings/page.tsx` |
+
+**Migration（待 Dashboard 執行）**
+- `031_app_users_permissions.sql` — 未執行前 `permissions` / `is_active` 欄位不存在；管理 RPC 不存在；sign_in 仍是舊版（不回 permissions）
+- 執行後現有帳號 permissions 預設為 `{}`，相當於「全頁面 none」 → 非 admin 帳號會進不去任何頁面，需 admin 重新設定
+
+---
 
 ### 2026-05-04 — 庫存頁卡片可拖拉排序（同類別/分類內）
 

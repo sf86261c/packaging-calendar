@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useCurrentUserClient } from '@/lib/auth'
+import { useCurrentUserClient, type UserPermissions, type PageRoute, type PageMode } from '@/lib/auth'
 import { logActivity } from '@/lib/activity'
 import {
   Dialog,
@@ -30,6 +30,24 @@ import type { PackagingMaterial, ProductRecipe, ProductMaterialUsage } from '@/l
 interface RecipeRow {
   ingredientId: string
   qty: string
+}
+
+interface AppUserRow {
+  id: string
+  username: string
+  is_admin: boolean
+  permissions: UserPermissions
+  is_active: boolean
+  created_at: string
+}
+
+const PAGE_ROUTES: PageRoute[] = ['calendar', 'dashboard', 'inventory', 'activity', 'settings']
+const PAGE_LABELS: Record<PageRoute, string> = {
+  calendar: '月曆',
+  dashboard: '統計',
+  inventory: '庫存',
+  activity: '紀錄',
+  settings: '設定',
 }
 
 interface MaterialRow {
@@ -229,6 +247,23 @@ export default function SettingsPage() {
   const [newProductMaterials, setNewProductMaterials] = useState<MaterialRow[]>([])
   const [editingProductId, setEditingProductId] = useState<string | null>(null)
 
+  // App users
+  const [appUsers, setAppUsers] = useState<AppUserRow[]>([])
+  const [userDialogOpen, setUserDialogOpen] = useState(false)
+  const [userDialogMode, setUserDialogMode] = useState<'create' | 'edit'>('create')
+  const [userFormId, setUserFormId] = useState<string>('')
+  const [userFormName, setUserFormName] = useState('')
+  const [userFormPwd, setUserFormPwd] = useState('')
+  const [userFormIsAdmin, setUserFormIsAdmin] = useState(false)
+  const [userFormIsActive, setUserFormIsActive] = useState(true)
+  const [userFormPerms, setUserFormPerms] = useState<UserPermissions>({})
+  const [userSaving, setUserSaving] = useState(false)
+
+  const [pwdDialogOpen, setPwdDialogOpen] = useState(false)
+  const [pwdTargetId, setPwdTargetId] = useState('')
+  const [pwdTargetName, setPwdTargetName] = useState('')
+  const [pwdNewValue, setPwdNewValue] = useState('')
+
   // --- Fetch data ----------------------------------------------------------
 
   const fetchProducts = useCallback(async () => {
@@ -278,6 +313,16 @@ export default function SettingsPage() {
     if (data) setMaterialUsages(data as ProductMaterialUsage[])
   }, [supabase])
 
+  const fetchAppUsers = useCallback(async () => {
+    if (!user?.is_admin) return
+    const { data, error } = await supabase.rpc('admin_list_users', { p_caller_id: user.id })
+    if (error) {
+      console.warn('admin_list_users failed', error)
+      return
+    }
+    setAppUsers((data ?? []) as AppUserRow[])
+  }, [supabase, user?.id, user?.is_admin])
+
   useEffect(() => {
     fetchProducts()
     fetchPackagingStyles()
@@ -285,7 +330,8 @@ export default function SettingsPage() {
     fetchMaterials()
     fetchRecipes()
     fetchMaterialUsages()
-  }, [fetchProducts, fetchPackagingStyles, fetchBrandingStyles, fetchMaterials, fetchRecipes, fetchMaterialUsages])
+    fetchAppUsers()
+  }, [fetchProducts, fetchPackagingStyles, fetchBrandingStyles, fetchMaterials, fetchRecipes, fetchMaterialUsages, fetchAppUsers])
 
   // --- Product CRUD --------------------------------------------------------
 
@@ -496,6 +542,156 @@ export default function SettingsPage() {
     setNewProductRecipes([])
     setNewProductMaterials([])
     setEditingProductId(null)
+  }
+
+  // --- App user CRUD ------------------------------------------------------
+
+  const PRESET_PERMS: Record<string, { is_admin: boolean; permissions: UserPermissions; label: string }> = {
+    admin: {
+      is_admin: true,
+      permissions: {},
+      label: '管理員（全權）',
+    },
+    operator: {
+      is_admin: false,
+      permissions: { calendar: 'edit', dashboard: 'view', inventory: 'edit', activity: 'view', settings: 'none' },
+      label: '操作員（日常 CRUD）',
+    },
+    viewer: {
+      is_admin: false,
+      permissions: { calendar: 'view', dashboard: 'view', inventory: 'view', activity: 'view', settings: 'none' },
+      label: '檢視者（唯讀）',
+    },
+    sales_only: {
+      is_admin: false,
+      permissions: { calendar: 'adjustment_only', dashboard: 'none', inventory: 'none', activity: 'none', settings: 'none' },
+      label: '門市/試吃only（僅試吃/耗損/散單）',
+    },
+  }
+
+  const openCreateUser = () => {
+    setUserDialogMode('create')
+    setUserFormId('')
+    setUserFormName('')
+    setUserFormPwd('')
+    setUserFormIsAdmin(false)
+    setUserFormIsActive(true)
+    setUserFormPerms({ calendar: 'edit', dashboard: 'view', inventory: 'edit', activity: 'view', settings: 'none' })
+    setUserDialogOpen(true)
+  }
+
+  const openEditUser = (u: AppUserRow) => {
+    setUserDialogMode('edit')
+    setUserFormId(u.id)
+    setUserFormName(u.username)
+    setUserFormPwd('')
+    setUserFormIsAdmin(u.is_admin)
+    setUserFormIsActive(u.is_active)
+    setUserFormPerms(u.permissions ?? {})
+    setUserDialogOpen(true)
+  }
+
+  const applyPreset = (key: keyof typeof PRESET_PERMS) => {
+    const p = PRESET_PERMS[key]
+    setUserFormIsAdmin(p.is_admin)
+    setUserFormPerms(p.permissions)
+  }
+
+  const setPermFor = (page: PageRoute, mode: PageMode) => {
+    setUserFormPerms(prev => ({ ...prev, [page]: mode }))
+  }
+
+  const handleSaveUser = async () => {
+    if (!user?.is_admin) return
+    if (userDialogMode === 'create') {
+      if (!userFormName.trim() || !userFormPwd.trim()) {
+        alert('帳號與密碼不可為空')
+        return
+      }
+      setUserSaving(true)
+      const { error } = await supabase.rpc('admin_create_user', {
+        p_caller_id: user.id,
+        p_username: userFormName.trim(),
+        p_password: userFormPwd,
+        p_is_admin: userFormIsAdmin,
+        p_permissions: userFormPerms,
+      })
+      setUserSaving(false)
+      if (error) { alert(`新增失敗：${error.message}`); return }
+      await logActivity('新增帳號', null, {
+        帳號: userFormName.trim(),
+        角色: userFormIsAdmin ? '管理員' : '一般使用者',
+      })
+      setUserDialogOpen(false)
+      fetchAppUsers()
+    } else {
+      setUserSaving(true)
+      const { error } = await supabase.rpc('admin_update_user', {
+        p_caller_id: user.id,
+        p_target_id: userFormId,
+        p_is_admin: userFormIsAdmin,
+        p_permissions: userFormPerms,
+        p_is_active: userFormIsActive,
+      })
+      setUserSaving(false)
+      if (error) { alert(`更新失敗：${error.message}`); return }
+      await logActivity('編輯帳號', `user:${userFormId}`, {
+        帳號: userFormName,
+        角色: userFormIsAdmin ? '管理員' : '一般使用者',
+        啟用: userFormIsActive ? '是' : '否',
+      })
+      setUserDialogOpen(false)
+      fetchAppUsers()
+    }
+  }
+
+  const openResetPwd = (u: AppUserRow) => {
+    setPwdTargetId(u.id)
+    setPwdTargetName(u.username)
+    setPwdNewValue('')
+    setPwdDialogOpen(true)
+  }
+
+  const handleResetPwd = async () => {
+    if (!user?.is_admin) return
+    if (!pwdNewValue.trim() || pwdNewValue.length < 4) {
+      alert('密碼至少 4 個字元')
+      return
+    }
+    setUserSaving(true)
+    const { error } = await supabase.rpc('admin_reset_password', {
+      p_caller_id: user.id,
+      p_target_id: pwdTargetId,
+      p_new_password: pwdNewValue,
+    })
+    setUserSaving(false)
+    if (error) { alert(`重設失敗：${error.message}`); return }
+    await logActivity('重設密碼', `user:${pwdTargetId}`, { 帳號: pwdTargetName })
+    setPwdDialogOpen(false)
+  }
+
+  const handleDeleteUser = async (u: AppUserRow) => {
+    if (!user?.is_admin) return
+    if (u.id === user.id) { alert('不能刪除自己'); return }
+    if (!confirm(`確定刪除帳號「${u.username}」？此操作不可復原。`)) return
+    const { error } = await supabase.rpc('admin_delete_user', {
+      p_caller_id: user.id,
+      p_target_id: u.id,
+    })
+    if (error) { alert(`刪除失敗：${error.message}`); return }
+    await logActivity('刪除帳號', `user:${u.id}`, { 帳號: u.username })
+    fetchAppUsers()
+  }
+
+  const roleLabel = (u: AppUserRow): string => {
+    if (u.is_admin) return '管理員'
+    const p = u.permissions ?? {}
+    if (p.calendar === 'adjustment_only') return '門市/試吃only'
+    const allView = PAGE_ROUTES.every(r => p[r] === 'view')
+    if (allView) return '檢視者'
+    const opMatch = p.calendar === 'edit' && p.inventory === 'edit'
+    if (opMatch) return '操作員'
+    return '自訂'
   }
 
   const openEditProduct = (product: Product) => {
@@ -1151,15 +1347,198 @@ export default function SettingsPage() {
         {/* 帳號管理                                                       */}
         {/* ============================================================= */}
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">帳號管理</CardTitle>
+            <Button size="sm" onClick={openCreateUser}>
+              <PlusIcon className="size-3" /> 新增帳號
+            </Button>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-gray-500">
-              可在 Supabase Dashboard 管理使用者帳號
-            </p>
+            {appUsers.length === 0 ? (
+              <p className="text-sm text-gray-500">尚無帳號資料</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs text-gray-500">
+                      <th className="py-2 pr-2 font-normal">帳號</th>
+                      <th className="py-2 pr-2 font-normal">角色</th>
+                      <th className="py-2 pr-2 font-normal">狀態</th>
+                      <th className="py-2 pr-2 font-normal">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {appUsers.map(u => {
+                      const isSelf = u.id === user?.id
+                      return (
+                        <tr key={u.id} className="border-b last:border-b-0">
+                          <td className="py-2 pr-2">
+                            {u.username}
+                            {isSelf && <span className="ml-1 text-xs text-gray-400">（你）</span>}
+                          </td>
+                          <td className="py-2 pr-2">
+                            <span className={u.is_admin ? 'font-medium text-blue-700' : ''}>
+                              {roleLabel(u)}
+                            </span>
+                          </td>
+                          <td className="py-2 pr-2">
+                            <span className={u.is_active ? 'text-green-700' : 'text-gray-400 line-through'}>
+                              {u.is_active ? '啟用' : '停用'}
+                            </span>
+                          </td>
+                          <td className="py-2 pr-2 space-x-1">
+                            <Button variant="ghost" size="xs" onClick={() => openEditUser(u)}>編輯</Button>
+                            <Button variant="ghost" size="xs" onClick={() => openResetPwd(u)}>密碼</Button>
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              className="text-red-600 hover:text-red-700"
+                              onClick={() => handleDeleteUser(u)}
+                              disabled={isSelf}
+                            >
+                              刪除
+                            </Button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </CardContent>
         </Card>
+
+        {/* User Dialog: 新增 / 編輯 */}
+        <Dialog open={userDialogOpen} onOpenChange={setUserDialogOpen}>
+          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>{userDialogMode === 'create' ? '新增帳號' : `編輯帳號「${userFormName}」`}</DialogTitle>
+              <DialogDescription>
+                設定帳號角色與各頁面權限。管理員勾選後 permissions 會被忽略（永遠全頁面 edit）。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              {userDialogMode === 'create' && (
+                <>
+                  <div>
+                    <Label>帳號</Label>
+                    <Input
+                      value={userFormName}
+                      onChange={e => setUserFormName(e.target.value)}
+                      placeholder="新帳號名稱"
+                    />
+                  </div>
+                  <div>
+                    <Label>初始密碼</Label>
+                    <Input
+                      type="password"
+                      value={userFormPwd}
+                      onChange={e => setUserFormPwd(e.target.value)}
+                      placeholder="至少 4 個字元"
+                    />
+                  </div>
+                </>
+              )}
+
+              <div>
+                <Label className="text-xs text-gray-500">快速套用角色預設</Label>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {(Object.keys(PRESET_PERMS) as (keyof typeof PRESET_PERMS)[]).map(k => (
+                    <Button key={k} variant="outline" size="xs" onClick={() => applyPreset(k)}>
+                      {PRESET_PERMS[k].label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  id="user-is-admin"
+                  type="checkbox"
+                  checked={userFormIsAdmin}
+                  onChange={e => setUserFormIsAdmin(e.target.checked)}
+                />
+                <label htmlFor="user-is-admin" className="text-sm">管理員（全頁面 edit）</label>
+              </div>
+
+              {userDialogMode === 'edit' && (
+                <div className="flex items-center gap-2">
+                  <input
+                    id="user-is-active"
+                    type="checkbox"
+                    checked={userFormIsActive}
+                    onChange={e => setUserFormIsActive(e.target.checked)}
+                    disabled={userFormId === user?.id}
+                  />
+                  <label htmlFor="user-is-active" className="text-sm">
+                    啟用（停用後無法登入）
+                    {userFormId === user?.id && <span className="ml-1 text-xs text-gray-400">不能停用自己</span>}
+                  </label>
+                </div>
+              )}
+
+              <div className={userFormIsAdmin ? 'opacity-40 pointer-events-none' : ''}>
+                <Label className="text-xs text-gray-500">頁面權限</Label>
+                <div className="mt-1 space-y-2">
+                  {PAGE_ROUTES.map(p => (
+                    <div key={p} className="flex items-center gap-2">
+                      <span className="w-12 text-sm">{PAGE_LABELS[p]}</span>
+                      <select
+                        value={userFormPerms[p] ?? 'none'}
+                        onChange={e => setPermFor(p, e.target.value as PageMode)}
+                        className="flex h-8 flex-1 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm"
+                      >
+                        <option value="none">無權限（不顯示）</option>
+                        <option value="view">可查看（不可編輯）</option>
+                        <option value="edit">可編輯</option>
+                        {p === 'calendar' && (
+                          <option value="adjustment_only">僅試吃/耗損/散單按鈕</option>
+                        )}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+                {userFormIsAdmin && (
+                  <p className="mt-1 text-xs text-gray-400">已勾管理員 → 權限設定無效</p>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setUserDialogOpen(false)} disabled={userSaving}>取消</Button>
+              <Button onClick={handleSaveUser} disabled={userSaving}>
+                {userSaving ? '儲存中...' : userDialogMode === 'create' ? '建立' : '儲存'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Reset Password Dialog */}
+        <Dialog open={pwdDialogOpen} onOpenChange={setPwdDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>重設「{pwdTargetName}」的密碼</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div>
+                <Label>新密碼</Label>
+                <Input
+                  type="password"
+                  value={pwdNewValue}
+                  onChange={e => setPwdNewValue(e.target.value)}
+                  placeholder="至少 4 個字元"
+                  onKeyDown={e => { if (e.key === 'Enter' && pwdNewValue.length >= 4) handleResetPwd() }}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setPwdDialogOpen(false)} disabled={userSaving}>取消</Button>
+              <Button onClick={handleResetPwd} disabled={userSaving || pwdNewValue.length < 4}>
+                {userSaving ? '儲存中...' : '重設'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )
