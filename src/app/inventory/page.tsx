@@ -41,6 +41,11 @@ interface MaterialStock {
   is_active: boolean
   category_id: string | null
   sort_order: number
+  has_water_source: boolean
+  water_source_quantity: number
+  // base = 現有庫存 (date <= today + lead_time)；
+  // stock = base + water_source_quantity 用於 isLow 比對 / 顯示「總庫存」
+  base_stock: number
   stock: number
 }
 
@@ -79,6 +84,7 @@ export default function InventoryPage() {
   const [mInboundMat, setMInboundMat] = useState('')
   const [mInboundQty, setMInboundQty] = useState('')
   const [mInboundNote, setMInboundNote] = useState('')
+  const [mInboundToWater, setMInboundToWater] = useState(false)
 
   // Material add/edit dialogs
   const [matAddOpen, setMatAddOpen] = useState(false)
@@ -87,6 +93,8 @@ export default function InventoryPage() {
   const [matSafety, setMatSafety] = useState('100')
   const [matLeadTime, setMatLeadTime] = useState('7')
   const [matCategory, setMatCategory] = useState<string>('')
+  const [matHasWater, setMatHasWater] = useState(false)
+  const [matWaterQty, setMatWaterQty] = useState('0')
 
   const [matEditOpen, setMatEditOpen] = useState(false)
   const [matEditId, setMatEditId] = useState('')
@@ -95,6 +103,8 @@ export default function InventoryPage() {
   const [matEditSafety, setMatEditSafety] = useState('')
   const [matEditLeadTime, setMatEditLeadTime] = useState('7')
   const [matEditCategory, setMatEditCategory] = useState<string>('')
+  const [matEditHasWater, setMatEditHasWater] = useState(false)
+  const [matEditWaterQty, setMatEditWaterQty] = useState('0')
 
   // Material categories
   const [categories, setCategories] = useState<MaterialCategoryRow[]>([])
@@ -222,10 +232,11 @@ export default function InventoryPage() {
     const materialsWithStock: MaterialStock[] = matList.map(m => {
       const lead = m.lead_time_days ?? 7
       const dateLimit = leadDateStr(lead)
-      const stock = matInvData
+      const baseStock = matInvData
         .filter(r => r.material_id === m.id && r.date <= dateLimit)
         .reduce((sum, r) => sum + r.quantity, 0)
-      return { ...m, stock }
+      const water = m.has_water_source ? (m.water_source_quantity ?? 0) : 0
+      return { ...m, base_stock: baseStock, stock: baseStock + water }
     })
     setMaterials(materialsWithStock)
 
@@ -310,13 +321,60 @@ export default function InventoryPage() {
   const handleMaterialInbound = async () => {
     if (!isAdmin) return
     if (!mInboundMat || !mInboundQty) return
+    const qty = parseInt(mInboundQty)
+    if (Number.isNaN(qty) || qty <= 0) return
     setSaving(true)
-    await supabase.from('packaging_material_inventory').insert({
-      material_id: mInboundMat, type: 'inbound',
-      quantity: parseInt(mInboundQty), reference_note: mInboundNote || null,
-    })
-    setMInboundMat(''); setMInboundQty(''); setMInboundNote('')
+    if (mInboundToWater) {
+      // 入庫到水源：直接更新 packaging_materials.water_source_quantity
+      const target = materials.find(m => m.id === mInboundMat)
+      const newQty = (target?.water_source_quantity ?? 0) + qty
+      const { error } = await supabase
+        .from('packaging_materials')
+        .update({ has_water_source: true, water_source_quantity: newQty })
+        .eq('id', mInboundMat)
+      if (error) {
+        alert(`水源入庫失敗：${error.message}`); setSaving(false); return
+      }
+      await logActivity('包材入庫(水源)', `material:${mInboundMat}`, {
+        包材: target?.name ?? '',
+        數量: qty,
+        備註: mInboundNote || null,
+      })
+    } else {
+      const { error } = await supabase.from('packaging_material_inventory').insert({
+        material_id: mInboundMat, type: 'inbound',
+        quantity: qty, reference_note: mInboundNote || null,
+      })
+      if (error) { alert(`入庫失敗：${error.message}`); setSaving(false); return }
+    }
+    setMInboundMat(''); setMInboundQty(''); setMInboundNote(''); setMInboundToWater(false)
     setMaterialInboundOpen(false); setSaving(false); fetchAll()
+  }
+
+  const handleTransferWaterSource = async (m: MaterialStock) => {
+    if (!isAdmin) return
+    const water = m.water_source_quantity ?? 0
+    if (water <= 0) { alert('水源庫存為 0，無需轉移'); return }
+    if (!confirm(`確定將「${m.name}」水源庫存 ${water} ${m.unit} 轉移到主庫存？\n（總庫存不變，水源歸零、主庫存 +${water}）`)) return
+    const today = format(new Date(), 'yyyy-MM-dd')
+    // 1. 寫一筆 inbound 紀錄（quantity=+W）
+    const insertRes = await supabase.from('packaging_material_inventory').insert({
+      material_id: m.id, type: 'inbound', date: today,
+      quantity: water,
+      reference_note: 'water_source_transfer',
+    })
+    if (insertRes.error) { alert(`轉移失敗：${insertRes.error.message}`); return }
+    // 2. 水源歸零
+    const updateRes = await supabase
+      .from('packaging_materials')
+      .update({ water_source_quantity: 0 })
+      .eq('id', m.id)
+    if (updateRes.error) { alert(`水源歸零失敗（轉移已寫入但水源仍有舊值）：${updateRes.error.message}`); fetchAll(); return }
+    await logActivity('水源庫存轉移', `material:${m.id}`, {
+      包材: m.name,
+      轉移數量: water,
+    })
+    fetchAll()
   }
 
   // ─── Material handlers ────────────────────────
@@ -331,9 +389,11 @@ export default function InventoryPage() {
       safety_stock: parseInt(matSafety) || 100,
       lead_time_days: parseInt(matLeadTime) || 7,
       category_id: matCategory || null,
+      has_water_source: matHasWater,
+      water_source_quantity: matHasWater ? (parseInt(matWaterQty) || 0) : 0,
     })
     setMatName(''); setMatUnit('個'); setMatSafety('100'); setMatLeadTime('7')
-    setMatCategory('')
+    setMatCategory(''); setMatHasWater(false); setMatWaterQty('0')
     setMatAddOpen(false); setSaving(false); fetchAll()
   }
 
@@ -345,6 +405,8 @@ export default function InventoryPage() {
     setMatEditSafety(String(m.safety_stock))
     setMatEditLeadTime(String(m.lead_time_days ?? 7))
     setMatEditCategory(m.category_id ?? '')
+    setMatEditHasWater(!!m.has_water_source)
+    setMatEditWaterQty(String(m.water_source_quantity ?? 0))
     setMatEditOpen(true)
   }
 
@@ -358,6 +420,8 @@ export default function InventoryPage() {
       safety_stock: parseInt(matEditSafety) || 0,
       lead_time_days: parseInt(matEditLeadTime) || 7,
       category_id: matEditCategory || null,
+      has_water_source: matEditHasWater,
+      water_source_quantity: matEditHasWater ? (parseInt(matEditWaterQty) || 0) : 0,
     }).eq('id', matEditId)
     setMatEditOpen(false); setSaving(false); fetchAll()
   }
@@ -844,6 +908,22 @@ export default function InventoryPage() {
               </button>
             )}
           </div>
+          {m.has_water_source && (
+            <div className="mt-1 flex items-center gap-2 text-xs">
+              <span className="text-gray-500">
+                現有 {m.base_stock.toLocaleString()} / 水源 <span className="font-semibold text-blue-700">{(m.water_source_quantity ?? 0).toLocaleString()}</span>
+              </span>
+              {isAdmin && (m.water_source_quantity ?? 0) > 0 && (
+                <button
+                  onClick={() => handleTransferWaterSource(m)}
+                  className="rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
+                  title="把水源庫存轉移到主庫存（總庫存不變）"
+                >
+                  庫存轉移 →
+                </button>
+              )}
+            </div>
+          )}
           <div className="mt-1 text-xs text-gray-500">安全庫存: {m.safety_stock.toLocaleString()}</div>
           <div className="mt-2 h-2 w-full rounded-full bg-gray-200">
             <div className={`h-2 rounded-full ${m.stock >= m.safety_stock ? 'bg-green-500' : m.stock > 0 ? 'bg-orange-500' : 'bg-red-500'}`} style={{ width: `${pct}%` }} />
@@ -1078,7 +1158,7 @@ export default function InventoryPage() {
       </Dialog>
 
       {/* ── Material Inbound Dialog ── */}
-      <Dialog open={materialInboundOpen} onOpenChange={setMaterialInboundOpen}>
+      <Dialog open={materialInboundOpen} onOpenChange={(o) => { if (!o) { setMInboundToWater(false) } setMaterialInboundOpen(o) }}>
         <DialogContent>
           <DialogHeader><DialogTitle>包材入庫</DialogTitle></DialogHeader>
           <div className="space-y-4 pt-2">
@@ -1096,6 +1176,19 @@ export default function InventoryPage() {
             <div>
               <Label>入庫數量</Label>
               <Input type="number" min={1} value={mInboundQty} onChange={e => setMInboundQty(e.target.value)} placeholder="數量" />
+              <label className="mt-2 flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={mInboundToWater}
+                  onChange={e => setMInboundToWater(e.target.checked)}
+                />
+                入庫到水源
+              </label>
+              {mInboundToWater && (
+                <p className="mt-1 text-[10px] text-gray-400">
+                  將累加至「水源庫存」（不寫入庫紀錄），自動勾選此包材的「水源有庫存」。可在卡片上「庫存轉移」把水源轉成現有庫存。
+                </p>
+              )}
             </div>
             <div>
               <Label>備註</Label>
@@ -1163,6 +1256,29 @@ export default function InventoryPage() {
               <Input type="number" min={1} value={matLeadTime} onChange={e => setMatLeadTime(e.target.value)} placeholder="7" />
               <p className="mt-1 text-xs text-gray-400">叫貨後幾天到貨（D+?），用於判斷是否需發送叫貨通知</p>
             </div>
+            <div className="rounded-md border border-gray-200 bg-gray-50 p-2 space-y-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={matHasWater}
+                  onChange={e => setMatHasWater(e.target.checked)}
+                />
+                水源有庫存
+              </label>
+              {matHasWater && (
+                <div>
+                  <Label className="text-xs text-gray-500">水源數量</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={matWaterQty}
+                    onChange={e => setMatWaterQty(e.target.value)}
+                    placeholder="0"
+                  />
+                  <p className="mt-1 text-[10px] text-gray-400">總庫存 = 現有 + 水源；可在卡片上「庫存轉移」把水源轉到現有</p>
+                </div>
+              )}
+            </div>
             <Button className="w-full" onClick={handleAddMaterial} disabled={saving || !matName.trim()}>
               {saving ? '儲存中...' : '新增包材'}
             </Button>
@@ -1224,6 +1340,28 @@ export default function InventoryPage() {
               <Label>到貨時間（天）</Label>
               <Input type="number" min={1} value={matEditLeadTime} onChange={e => setMatEditLeadTime(e.target.value)} />
               <p className="mt-1 text-xs text-gray-400">叫貨後幾天到貨（D+?）</p>
+            </div>
+            <div className="rounded-md border border-gray-200 bg-gray-50 p-2 space-y-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={matEditHasWater}
+                  onChange={e => setMatEditHasWater(e.target.checked)}
+                />
+                水源有庫存
+              </label>
+              {matEditHasWater && (
+                <div>
+                  <Label className="text-xs text-gray-500">水源數量</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={matEditWaterQty}
+                    onChange={e => setMatEditWaterQty(e.target.value)}
+                  />
+                  <p className="mt-1 text-[10px] text-gray-400">總庫存 = 現有 + 水源；取消勾選會把水源歸零</p>
+                </div>
+              )}
             </div>
             <Button className="w-full" onClick={handleEditMaterial} disabled={saving || !matEditName.trim()}>
               {saving ? '儲存中...' : '儲存變更'}

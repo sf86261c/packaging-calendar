@@ -74,7 +74,7 @@ export async function GET() {
     // ── Material inventory: D+lead_time per material ──
     const { data: materials } = await supabase
       .from('packaging_materials')
-      .select('id, name, unit, safety_stock, lead_time_days')
+      .select('id, name, unit, safety_stock, lead_time_days, has_water_source, water_source_quantity')
       .eq('is_active', true)
 
     const lowMaterials: { name: string; stock: number; safety: number; leadTime: number }[] = []
@@ -103,14 +103,16 @@ export async function GET() {
       }
 
       for (const mat of materials) {
-        const leadDays = mat.lead_time_days ?? 7
+        const m = mat as { id: string; name: string; safety_stock: number; lead_time_days?: number; has_water_source?: boolean; water_source_quantity?: number }
+        const leadDays = m.lead_time_days ?? 7
         const leadDate = addDaysISO(leadDays)
-        const stock = matInvData
-          .filter(r => r.material_id === mat.id && r.date <= leadDate)
+        const baseStock = matInvData
+          .filter(r => r.material_id === m.id && r.date <= leadDate)
           .reduce((sum: number, r: { quantity: number }) => sum + r.quantity, 0)
-
-        if (stock < mat.safety_stock) {
-          lowMaterials.push({ name: mat.name, stock, safety: mat.safety_stock, leadTime: leadDays })
+        const water = m.has_water_source ? (m.water_source_quantity ?? 0) : 0
+        const stock = baseStock + water
+        if (stock < m.safety_stock) {
+          lowMaterials.push({ name: m.name, stock, safety: m.safety_stock, leadTime: leadDays })
         }
       }
     }

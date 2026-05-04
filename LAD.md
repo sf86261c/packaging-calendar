@@ -248,6 +248,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `029_deactivate_tube_pkg.sql` | 停用 tube_pkg 三筆產品（四季童話 / 銀河探險 / 樂園馬戲），改由 product_material_usage 接手包裝消耗 |
 | `030_packaging_materials_sort_order.sql` | packaging_materials 加 sort_order 欄位，初始按 name 排序（10/20/30...）|
 | `031_app_users_permissions.sql` | app_users 加 permissions JSONB + is_active；管理 RPC（admin_list/create/update/reset_password/delete），sign_in 加 is_active 檢查並回傳 permissions |
+| `032_packaging_materials_water_source.sql` | packaging_materials 加 has_water_source + water_source_quantity（水源庫存功能） |
 
 ## 檔案結構
 
@@ -431,6 +432,53 @@ ALTER TABLE stock_adjustments
 ```
 
 ## 變更紀錄
+
+### 2026-05-04 — 包材水源庫存（總庫存 = 現有 + 水源、入庫到水源、庫存轉移）
+
+**需求**：每個包材可選「水源有庫存」，勾選後輸入水源數量；總庫存 = 現有 + 水源 → 用總庫存比對 D+N；包材入庫時可選「入庫到水源」；卡片上「庫存轉移」按鈕把水源轉到主庫存（總數不變）。
+
+**用途**：代工廠 / 上游倉庫尚有庫存量，要納入「整體可用量」計算，但不混入主倉的累計紀錄；待實際送達後再轉移。
+
+**Migration 032**
+- `packaging_materials.has_water_source BOOLEAN DEFAULT FALSE`
+- `packaging_materials.water_source_quantity INT DEFAULT 0`
+
+**MaterialStock 拆兩個 stock**
+- `base_stock`：現有 = SUM(packaging_material_inventory) WHERE date ≤ today + lead_time
+- `stock`：base_stock + (has_water_source ? water_source_quantity : 0) → 用於 isLow 判定 / 進度條 / 卡片大字
+
+**UI**
+- 卡片大字仍顯示總庫存
+- has_water_source = true 時：底下小字「現有 X / 水源 Y」+「庫存轉移 →」按鈕（admin only，水源 > 0 才出現）
+- 新增/編輯包材 dialog：「水源有庫存」勾選 + 數量輸入
+- 包材入庫 dialog：「入庫到水源」勾選 → 走另一條路徑（不寫 inventory record）
+
+**handler**
+- `handleMaterialInbound` 拆兩條路徑：
+  - 入庫到水源 → `UPDATE packaging_materials SET has_water_source=TRUE, water_source_quantity = 舊值 + qty`
+  - 一般入庫 → 寫 `packaging_material_inventory` inbound（既有行為）
+- `handleTransferWaterSource`：
+  1. INSERT inbound record (quantity = +water)
+  2. UPDATE water_source_quantity = 0
+  3. 結果：base += water、water = 0、total 不變
+
+**叫貨通知（line-notify）**
+- 同步用「總庫存」(base + water) 比對 safety_stock，避免水源被忽略導致誤報叫貨
+
+**取捨**
+- 水源用單值欄位（非紀錄表）：簡單；缺點是無歷史軌跡（誰入庫到水源、何時轉移）→ 由 activity log 補足
+- 修正當前數量 dialog 仍只算 base_stock（不含水源）：「修正」針對主倉實際盤點，水源在另一處不在這裡校正
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| Migration 032（待 Dashboard 執行） | `supabase/migrations/032_packaging_materials_water_source.sql`（新增） |
+| PackagingMaterial 加水源欄位 | `src/lib/types.ts` |
+| MaterialStock 拆 base_stock/stock、UI 顯示水源、handler、入庫/編輯 dialog | `src/app/inventory/page.tsx` |
+| 叫貨通知用總庫存比對 | `src/app/api/line-notify/route.ts` |
+
+---
 
 ### 2026-05-04 — 帳號權限系統（per-page mode + 使用者管理 UI）
 

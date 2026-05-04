@@ -86,6 +86,8 @@ export interface PackagingMaterial {
   is_active: boolean
   category_id: string | null
   sort_order: number
+  has_water_source: boolean
+  water_source_quantity: number
 }
 
 export interface PackagingMaterialInventory {
