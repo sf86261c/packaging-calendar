@@ -85,6 +85,7 @@ export interface PackagingMaterial {
   safety_stock: number
   is_active: boolean
   category_id: string | null
+  sort_order: number
 }
 
 export interface PackagingMaterialInventory {

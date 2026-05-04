@@ -246,6 +246,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `027_stock_adjustment_material.sql` | stock_adjustment_items 加 material_id（試吃/耗損可選包材）、product_id 改 nullable、互斥 CHECK |
 | `028_packaging_material_categories.sql` | 新增包材分類表 + packaging_materials.category_id（自訂分類區塊用） |
 | `029_deactivate_tube_pkg.sql` | 停用 tube_pkg 三筆產品（四季童話 / 銀河探險 / 樂園馬戲），改由 product_material_usage 接手包裝消耗 |
+| `030_packaging_materials_sort_order.sql` | packaging_materials 加 sort_order 欄位，初始按 name 排序（10/20/30...）|
 
 ## 檔案結構
 
@@ -429,6 +430,47 @@ ALTER TABLE stock_adjustments
 ```
 
 ## 變更紀錄
+
+### 2026-05-04 — 庫存頁卡片可拖拉排序（同類別/分類內）
+
+**需求**：庫存頁每張卡（蜂蜜蛋糕條、曲奇、各分類包材）admin 可以拖動改順序。
+
+**設計**
+- 用 HTML5 native drag-and-drop（`draggable + onDragStart/onDragOver/onDrop`），不引入 dnd-kit 等 dependency
+- 排序持久化：
+  - `products` 已有 `sort_order` 欄位
+  - `packaging_materials` 新增 `sort_order INT DEFAULT 0`（Migration 030），backfill 按 name 排序給 10/20/30/...
+- 卡片左側加 `GripVertical` icon 暗示可拖；admin 才能拖
+- 拖拉範圍限制：
+  - 蜂蜜蛋糕（條）3 張之間互排
+  - 曲奇 6 張之間互排
+  - 各包材分類下的卡互排
+  - **不支援跨類別/跨分類**（用 `DragScope` type 比對 scope，dropTarget 類別不同直接無視）
+- 視覺回饋：
+  - 拖拉中的卡 `opacity-40`
+  - 可放置的卡 `ring-2 ring-blue-400 ring-offset-1`
+- 樂觀更新：drop 時先動 UI（馬上呈現新順序），再 batch update DB；失敗則 alert + fetchAll 還原
+
+**未支援**
+- 跨分類拖拉（包材從「蜂蜜蛋糕區」拖到「曲奇餅乾區」）→ 後續可加，但要特別處理 `category_id` 同步更新
+- 拖拉動畫（純 HTML5 native API 無平滑動畫）→ 必要時可換 `@dnd-kit`
+
+**取捨**
+- 純 HTML5 vs dnd-kit：選 native 換取零 dependency，犧牲動畫平滑度
+- sort_order 用 10/20/30 間隔：之後新增 / 微調可塞 15、25 而不必整批 reorder
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| Migration 030（待 Dashboard 執行） | `supabase/migrations/030_packaging_materials_sort_order.sql`（新增） |
+| `PackagingMaterial.sort_order` | `src/lib/types.ts` |
+| 拖拉 state + handler + 兩個 render 函式加 drag handlers + 各 grid 傳 scope/listIds | `src/app/inventory/page.tsx` |
+
+**Migration（待 Dashboard 執行）**
+- `030_packaging_materials_sort_order.sql` — 未執行前 `sort_order` 欄位不存在，包材排序仍按 name；執行後生效
+
+---
 
 ### 2026-05-04 — Dashboard 修 1000 筆 limit + 改「本月訂單」為「本月訂購人數」
 

@@ -7,7 +7,7 @@ import { logActivity } from '@/lib/activity'
 import { format, addDays } from 'date-fns'
 import {
   Loader2, Plus, Send, Pencil, Check, X, Package, AlertTriangle,
-  Trash2, Ban, Eye, EyeOff, Edit3, FolderPlus, Folder,
+  Trash2, Ban, Eye, EyeOff, Edit3, FolderPlus, Folder, GripVertical,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -39,6 +39,7 @@ interface MaterialStock {
   lead_time_days: number
   is_active: boolean
   category_id: string | null
+  sort_order: number
   stock: number
 }
 
@@ -120,6 +121,14 @@ export default function InventoryPage() {
   const [sendingLine, setSendingLine] = useState(false)
   const [lineMessage, setLineMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
 
+  // Drag-and-drop reorder
+  type DragScope =
+    | { kind: 'product'; category: 'cake_bar' | 'cookie' }
+    | { kind: 'material'; categoryId: string | null }
+  const [dragging, setDragging] = useState<{ scope: DragScope; id: string } | null>(null)
+  const scopeKey = (s: DragScope) => s.kind === 'product' ? `p:${s.category}` : `m:${s.categoryId ?? 'none'}`
+  const sameScope = (a: DragScope, b: DragScope) => scopeKey(a) === scopeKey(b)
+
   // ─── Fetch ─────────────────────────────────────
 
   const fetchAll = useCallback(async () => {
@@ -132,7 +141,7 @@ export default function InventoryPage() {
         .eq('is_active', true)
         .in('category', ['cake_bar', 'cookie'])
         .order('sort_order'),
-      supabase.from('packaging_materials').select('*').order('name'),
+      supabase.from('packaging_materials').select('*').order('sort_order').order('name'),
       supabase
         .from('packaging_material_categories')
         .select('id, name, sort_order')
@@ -541,6 +550,58 @@ export default function InventoryPage() {
     setSendingLine(false)
   }
 
+  // ─── Drag-and-drop reorder ────────────────────
+
+  const handleReorderProducts = async (orderedIds: string[]) => {
+    if (!isAdmin || orderedIds.length < 2) return
+    // 樂觀 update：先動 UI 再寫 DB
+    setProducts(prev => {
+      const idToSort: Record<string, number> = {}
+      orderedIds.forEach((id, i) => { idToSort[id] = (i + 1) * 10 })
+      return prev.map(p => p.id in idToSort ? { ...p, sort_order: idToSort[p.id] } : p)
+    })
+    const updates = orderedIds.map((id, i) =>
+      supabase.from('products').update({ sort_order: (i + 1) * 10 }).eq('id', id),
+    )
+    const results = await Promise.all(updates)
+    const err = results.find(r => r.error)
+    if (err?.error) { alert(`更新排序失敗：${err.error.message}`); fetchAll() }
+  }
+
+  const handleReorderMaterials = async (orderedIds: string[]) => {
+    if (!isAdmin || orderedIds.length < 2) return
+    setMaterials(prev => {
+      const idToSort: Record<string, number> = {}
+      orderedIds.forEach((id, i) => { idToSort[id] = (i + 1) * 10 })
+      return prev.map(m => m.id in idToSort ? { ...m, sort_order: idToSort[m.id] } : m)
+    })
+    const updates = orderedIds.map((id, i) =>
+      supabase.from('packaging_materials').update({ sort_order: (i + 1) * 10 }).eq('id', id),
+    )
+    const results = await Promise.all(updates)
+    const err = results.find(r => r.error)
+    if (err?.error) { alert(`更新排序失敗：${err.error.message}`); fetchAll() }
+  }
+
+  const handleCardDrop = (
+    scope: DragScope,
+    listIds: string[],
+    droppedOnId: string,
+  ) => {
+    if (!dragging) return
+    if (!sameScope(dragging.scope, scope)) return
+    if (dragging.id === droppedOnId) { setDragging(null); return }
+    const fromIdx = listIds.indexOf(dragging.id)
+    const toIdx = listIds.indexOf(droppedOnId)
+    if (fromIdx < 0 || toIdx < 0) { setDragging(null); return }
+    const reordered = [...listIds]
+    const [moved] = reordered.splice(fromIdx, 1)
+    reordered.splice(toIdx, 0, moved)
+    setDragging(null)
+    if (scope.kind === 'product') handleReorderProducts(reordered)
+    else handleReorderMaterials(reordered)
+  }
+
   // ─── Cookie visibility toggle ─────────────────
 
   const cookies = products.filter(p => p.category === 'cookie')
@@ -568,15 +629,44 @@ export default function InventoryPage() {
 
   // ─── Render ───────────────────────────────────
 
-  const renderProductCard = (p: ProductStock) => {
+  const renderProductCard = (p: ProductStock, scope: DragScope, listIds: string[]) => {
     const isLow = p.stock < p.safety_stock
     const isEditingSafety = editingSafetyId === p.id
     const isEditingLead = editingLeadId === p.id
+    const isDraggingThis = dragging?.id === p.id
+    const canDrop = !!dragging && sameScope(dragging.scope, scope) && dragging.id !== p.id
     return (
-      <Card key={p.id}>
+      <Card
+        key={p.id}
+        draggable={isAdmin}
+        onDragStart={(e) => {
+          if (!isAdmin) return
+          setDragging({ scope, id: p.id })
+          e.dataTransfer.effectAllowed = 'move'
+        }}
+        onDragEnd={() => setDragging(null)}
+        onDragOver={(e) => {
+          if (canDrop) {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+          }
+        }}
+        onDrop={(e) => {
+          if (canDrop) {
+            e.preventDefault()
+            handleCardDrop(scope, listIds, p.id)
+          }
+        }}
+        className={`${isDraggingThis ? 'opacity-40' : ''} ${canDrop ? 'ring-2 ring-blue-400 ring-offset-1' : ''} transition-all`}
+      >
         <CardContent className="pt-4">
           <div className="flex items-center justify-between gap-2">
-            <span className="font-medium break-words">{p.name}</span>
+            <div className="flex items-center gap-1 min-w-0">
+              {isAdmin && (
+                <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-gray-300 hover:text-gray-500" aria-label="拖拉排序" />
+              )}
+              <span className="font-medium break-words">{p.name}</span>
+            </div>
             <div className="flex items-center gap-1">
               {isEditingLead ? (
                 <div className="flex items-center gap-1">
@@ -671,14 +761,43 @@ export default function InventoryPage() {
     )
   }
 
-  const renderMaterialCard = (m: MaterialStock) => {
+  const renderMaterialCard = (m: MaterialStock, scope: DragScope, listIds: string[]) => {
     const isLow = m.stock < m.safety_stock
     const pct = m.safety_stock > 0 ? Math.min(100, (m.stock / m.safety_stock) * 100) : 100
+    const isDraggingThis = dragging?.id === m.id
+    const canDrop = !!dragging && sameScope(dragging.scope, scope) && dragging.id !== m.id
     return (
-      <Card key={m.id}>
+      <Card
+        key={m.id}
+        draggable={isAdmin}
+        onDragStart={(e) => {
+          if (!isAdmin) return
+          setDragging({ scope, id: m.id })
+          e.dataTransfer.effectAllowed = 'move'
+        }}
+        onDragEnd={() => setDragging(null)}
+        onDragOver={(e) => {
+          if (canDrop) {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+          }
+        }}
+        onDrop={(e) => {
+          if (canDrop) {
+            e.preventDefault()
+            handleCardDrop(scope, listIds, m.id)
+          }
+        }}
+        className={`${isDraggingThis ? 'opacity-40' : ''} ${canDrop ? 'ring-2 ring-blue-400 ring-offset-1' : ''} transition-all`}
+      >
         <CardContent className="pt-4">
           <div className="flex items-center justify-between">
-            <span className="font-medium break-words">{m.name}</span>
+            <div className="flex items-center gap-1 min-w-0">
+              {isAdmin && (
+                <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-gray-300 hover:text-gray-500" aria-label="拖拉排序" />
+              )}
+              <span className="font-medium break-words">{m.name}</span>
+            </div>
             <div className="flex items-center gap-1">
               <Badge variant="outline" className="text-[10px] text-gray-500">D+{m.lead_time_days ?? 7}</Badge>
               {isLow && <Badge variant="destructive" className="text-xs">低庫存</Badge>}
@@ -775,7 +894,9 @@ export default function InventoryPage() {
       {cakeBars.length > 0 && (
         <div className="mb-6">
           <h2 className="mb-3 text-lg font-semibold">蜂蜜蛋糕（條）</h2>
-          <div className="grid gap-3 sm:grid-cols-3">{cakeBars.map(renderProductCard)}</div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {cakeBars.map(p => renderProductCard(p, { kind: 'product', category: 'cake_bar' }, cakeBars.map(x => x.id)))}
+          </div>
         </div>
       )}
 
@@ -798,7 +919,9 @@ export default function InventoryPage() {
             )}
           </div>
           {!cookiesHidden && (
-            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">{cookies.map(renderProductCard)}</div>
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              {cookies.map(p => renderProductCard(p, { kind: 'product', category: 'cookie' }, cookies.map(x => x.id)))}
+            </div>
           )}
         </div>
       )}
@@ -860,7 +983,7 @@ export default function InventoryPage() {
                       <p className="ml-6 text-xs text-gray-400">此分類尚無包材</p>
                     ) : (
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                        {catMats.map(renderMaterialCard)}
+                        {catMats.map(m => renderMaterialCard(m, { kind: 'material', categoryId: cat.id }, catMats.map(x => x.id)))}
                       </div>
                     )}
                   </div>
@@ -878,7 +1001,7 @@ export default function InventoryPage() {
                       <span className="text-xs text-gray-400">({uncategorized.length})</span>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {uncategorized.map(renderMaterialCard)}
+                      {uncategorized.map(m => renderMaterialCard(m, { kind: 'material', categoryId: null }, uncategorized.map(x => x.id)))}
                     </div>
                   </div>
                 )
