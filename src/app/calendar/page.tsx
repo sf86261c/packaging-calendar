@@ -141,7 +141,7 @@ export default function CalendarPage() {
       supabase
         .from('packaging_materials')
         .select('id, name')
-        .in('name', ['小紙箱', '中紙箱', '大紙箱'])
+        .in('name', ['小紙箱', '中紙箱', '大紙箱', '曲奇大餅乾(愛熊)', '曲奇大餅乾(方熊)', '曲奇大餅乾(睡熊)'])
         .eq('is_active', true),
     ]).then(([pr, pk, mu, r, mat]) => {
       if (pr.data) setProducts(pr.data as Product[])
@@ -235,7 +235,7 @@ export default function CalendarPage() {
 
       const typeLabel =
         value.adjustmentType === 'sample' ? '試吃' :
-        value.adjustmentType === 'waste' ? '耗損' : '散單'
+        value.adjustmentType === 'waste' ? '耗損' : '散單/門市銷售'
       await logActivity(`新增${typeLabel}紀錄`, `adjustment:${adjustmentId}`, {
         類型: typeLabel,
         日期: todayStr,

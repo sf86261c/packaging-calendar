@@ -246,7 +246,7 @@ export default function DayOrderPage() {
       supabase
         .from('packaging_materials')
         .select('id, name')
-        .in('name', ['小紙箱', '中紙箱', '大紙箱'])
+        .in('name', ['小紙箱', '中紙箱', '大紙箱', '曲奇大餅乾(愛熊)', '曲奇大餅乾(方熊)', '曲奇大餅乾(睡熊)'])
         .eq('is_active', true),
     ]).then(([pr, pk, br, mu, rc, bm]) => {
       if (pr.data) setProducts(pr.data)
@@ -825,7 +825,7 @@ export default function DayOrderPage() {
 
       const typeLabel =
         value.adjustmentType === 'sample' ? '試吃' :
-        value.adjustmentType === 'waste' ? '耗損' : '散單'
+        value.adjustmentType === 'waste' ? '耗損' : '散單/門市銷售'
       await logActivity(
         editingAdjustment ? `編輯${typeLabel}紀錄` : `新增${typeLabel}紀錄`,
         `adjustment:${adjustmentId}`,
@@ -1204,7 +1204,7 @@ export default function DayOrderPage() {
                     {a.adjustment_type === 'sample'
                       ? '試吃'
                       : a.adjustment_type === 'retail'
-                        ? '散單'
+                        ? '散單/門市銷售'
                         : '耗損'}
                   </Badge>
                   <span className="text-gray-700">

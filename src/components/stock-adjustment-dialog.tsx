@@ -40,6 +40,9 @@ export function StockAdjustmentDialog({
 }: Props) {
   const [adjustmentType, setAdjustmentType] = useState<AdjustmentType>('sample')
   const [note, setNote] = useState('')
+  // 各類型強制 deductMode：試吃/散單只能成品、耗損只能原料
+  const defaultModeForType = (t: AdjustmentType): DeductMode =>
+    t === 'waste' ? 'ingredient' : 'finished'
   const [items, setItems] = useState<AdjustmentItemInput[]>([
     { productId: '', quantity: '1', deductMode: 'finished', packagingStyleId: '' },
   ])
@@ -49,9 +52,10 @@ export function StockAdjustmentDialog({
     if (open && initialValue) {
       setAdjustmentType(initialValue.adjustmentType)
       setNote(initialValue.note)
-      setItems(initialValue.items.length > 0 ? initialValue.items : [
-        { productId: '', quantity: '1', deductMode: 'finished', packagingStyleId: '' },
-      ])
+      const mode = defaultModeForType(initialValue.adjustmentType)
+      setItems(initialValue.items.length > 0
+        ? initialValue.items.map(it => ({ ...it, deductMode: mode }))
+        : [{ productId: '', quantity: '1', deductMode: mode, packagingStyleId: '' }])
     } else if (open && !initialValue) {
       setAdjustmentType('sample')
       setNote('')
@@ -60,7 +64,11 @@ export function StockAdjustmentDialog({
   }, [open, initialValue])
 
   const addItem = () =>
-    setItems((prev) => [...prev, { productId: '', quantity: '1', deductMode: 'finished', packagingStyleId: '' }])
+    setItems((prev) => [...prev, {
+      productId: '', quantity: '1',
+      deductMode: defaultModeForType(adjustmentType),
+      packagingStyleId: '',
+    }])
 
   const removeItem = (i: number) =>
     setItems((prev) => prev.filter((_, idx) => idx !== i))
@@ -90,14 +98,19 @@ export function StockAdjustmentDialog({
 
   // 成品：
   // - 散單：全部活躍的 蜂蜜蛋糕(cake) + 旋轉筒(tube) + 曲奇(cookie)
-  // - 試吃 / 耗損：僅列蜂蜜蛋糕試吃(cake 含"試吃")、旋轉筒試吃(tube 含"試吃")、所有曲奇
+  // - 試吃：蜂蜜蛋糕試吃(cake 含"試吃") + 旋轉筒試吃(tube 含"試吃") + 常用曲奇 (is_common)
+  // - 耗損：不顯示成品 mode（強制 ingredient）
   const finishedProducts = products.filter((p) => {
     if (!p.is_active) return false
     if (adjustmentType === 'retail') {
       return p.category === 'cake' || p.category === 'tube' || p.category === 'cookie'
     }
-    if (p.category === 'cookie') return true
-    if ((p.category === 'cake' || p.category === 'tube') && p.name.includes('試吃')) return true
+    if (adjustmentType === 'sample') {
+      // 曲奇只列常用組合（排除特殊口味）；蜂蜜蛋糕/旋轉筒只列含「試吃」
+      if (p.category === 'cookie') return p.is_common !== false
+      if ((p.category === 'cake' || p.category === 'tube') && p.name.includes('試吃')) return true
+      return false
+    }
     return false
   })
 
@@ -137,7 +150,7 @@ export function StockAdjustmentDialog({
                   checked={adjustmentType === 'waste'}
                   onChange={() => {
                     setAdjustmentType('waste')
-                    setItems([{ productId: '', quantity: '1', deductMode: 'finished', packagingStyleId: '' }])
+                    setItems([{ productId: '', quantity: '1', deductMode: 'ingredient', packagingStyleId: '' }])
                   }}
                 />
                 耗損
@@ -151,7 +164,7 @@ export function StockAdjustmentDialog({
                     setItems([{ productId: '', quantity: '1', deductMode: 'finished', packagingStyleId: '' }])
                   }}
                 />
-                散單
+                散單/門市銷售
               </label>
             </div>
           </div>
@@ -183,32 +196,6 @@ export function StockAdjustmentDialog({
               return (
                 <div key={i} className="space-y-1.5 rounded-lg border p-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex gap-2">
-                      <label className="flex items-center gap-1 text-xs">
-                        <input
-                          type="radio"
-                          checked={row.deductMode === 'finished'}
-                          onChange={() => {
-                            updateItem(i, 'deductMode', 'finished')
-                            updateItem(i, 'productId', '')
-                            updateItem(i, 'packagingStyleId', '')
-                          }}
-                        />
-                        成品
-                      </label>
-                      <label className="flex items-center gap-1 text-xs">
-                        <input
-                          type="radio"
-                          checked={row.deductMode === 'ingredient'}
-                          onChange={() => {
-                            updateItem(i, 'deductMode', 'ingredient')
-                            updateItem(i, 'productId', '')
-                            updateItem(i, 'packagingStyleId', '')
-                          }}
-                        />
-                        原料
-                      </label>
-                    </div>
                     <div className="flex min-w-0 flex-1 basis-[10rem] items-center gap-1.5">
                       <span className="shrink-0 rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
                         {row.deductMode === 'finished' ? '成品' : '原料'}
