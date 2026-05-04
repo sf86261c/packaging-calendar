@@ -429,6 +429,30 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-05-04 — 唱歌貓咪 widget 移到 AppShell（全頁面共用）
+
+**需求**：原本只有月曆頁顯示唱歌貓咪，希望切換任一頁面（統計/庫存/紀錄/設定…）都在同一位置看到。
+
+**設計**
+- `DraggableCat` 元件本來就是 `position: fixed` + 固定座標，掛在哪個 component 都不影響定位
+- 從 `src/app/calendar/page.tsx` 移除 import 與 `<DraggableCat />`
+- 在 `src/components/app-shell.tsx`「受保護頁面」分支的最外層 `<div>` 內掛入 `<DraggableCat />`
+- 公開頁面（`/login`、`/cat`）early return 不掛貓咪：避免登入畫面浮貓 + `/cat` 本身已是大貓咪展示頁
+
+**取捨**
+- 不必建 layout context 或 portal —— `position: fixed` 已脫離文件流，掛在 AppShell 哪個位置都同一視覺結果
+- 仍維持 `hidden md:block`：手機 sheet sidebar 沒固定的左下安全區，繼續隱藏避免擠版
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| AppShell 加 DraggableCat import 與外層掛點 | `src/components/app-shell.tsx` |
+| 月曆頁移除 import 與 `<DraggableCat />` | `src/app/calendar/page.tsx` |
+| 元件註解改為「AppShell 全域唱歌貓咪 widget」 | `src/components/draggable-cat.tsx` |
+
+---
+
 ### 2026-05-04 — 庫存卡可修正實際數量 + 包材自訂分類
 
 **需求**

@@ -11,7 +11,6 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { OrderFormDialog } from '@/components/order-form-dialog'
 import { StockAdjustmentDialog, type AdjustmentInput } from '@/components/stock-adjustment-dialog'
-import { DraggableCat } from '@/components/draggable-cat'
 import {
   calculateIngredientDeductions,
   calculateMaterialDeductions as calcMaterialDeductionsHelper,
@@ -503,8 +502,6 @@ export default function CalendarPage() {
         materials={boxMaterials}
         onSave={handleSaveAdjustment}
       />
-
-      <DraggableCat />
     </div>
   )
 }

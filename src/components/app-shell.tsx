@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
+import { DraggableCat } from '@/components/draggable-cat'
 import { useCurrentUserClient, signOut, getSessionExpiresAt, type AuthUser } from '@/lib/auth'
 import { logActivity } from '@/lib/activity'
 
@@ -193,6 +194,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <NavLinks currentUser={user} />
         </SheetContent>
       </Sheet>
+
+      <DraggableCat />
     </div>
   )
 }
