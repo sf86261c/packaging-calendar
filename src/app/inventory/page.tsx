@@ -151,18 +151,30 @@ export default function InventoryPage() {
     const productMaxDate = leadDateStr(maxProductLead)
     const productIds = prodList.map(p => p.id)
 
-    const { data: invData } = productIds.length > 0
-      ? await supabase
+    // Supabase 預設 max-rows=1000，超過會被截斷 → 必須分頁累加
+    type InvRow = { product_id: string; quantity: number; date: string }
+    const invData: InvRow[] = []
+    if (productIds.length > 0) {
+      const PAGE = 1000
+      let from = 0
+      while (true) {
+        const { data } = await supabase
           .from('inventory')
           .select('product_id, quantity, date')
           .lte('date', productMaxDate)
           .in('product_id', productIds)
-      : { data: [] as { product_id: string; quantity: number; date: string }[] }
+          .range(from, from + PAGE - 1)
+        const rows = (data ?? []) as InvRow[]
+        invData.push(...rows)
+        if (rows.length < PAGE) break
+        from += PAGE
+      }
+    }
 
     const productsWithStock: ProductStock[] = prodList.map(p => {
       const lead = p.lead_time_days ?? 15
       const dateLimit = leadDateStr(lead)
-      const stock = (invData ?? [])
+      const stock = invData
         .filter(r => r.product_id === p.id && r.date <= dateLimit)
         .reduce((sum, r) => sum + r.quantity, 0)
       return { ...p, stock }
@@ -178,18 +190,29 @@ export default function InventoryPage() {
     const materialMaxDate = leadDateStr(maxMaterialLead)
     const materialIds = matList.map(m => m.id)
 
-    const { data: matInvData } = materialIds.length > 0
-      ? await supabase
+    type MatInvRow = { material_id: string; quantity: number; date: string }
+    const matInvData: MatInvRow[] = []
+    if (materialIds.length > 0) {
+      const PAGE = 1000
+      let from = 0
+      while (true) {
+        const { data } = await supabase
           .from('packaging_material_inventory')
           .select('material_id, quantity, date')
           .lte('date', materialMaxDate)
           .in('material_id', materialIds)
-      : { data: [] as { material_id: string; quantity: number; date: string }[] }
+          .range(from, from + PAGE - 1)
+        const rows = (data ?? []) as MatInvRow[]
+        matInvData.push(...rows)
+        if (rows.length < PAGE) break
+        from += PAGE
+      }
+    }
 
     const materialsWithStock: MaterialStock[] = matList.map(m => {
       const lead = m.lead_time_days ?? 7
       const dateLimit = leadDateStr(lead)
-      const stock = (matInvData ?? [])
+      const stock = matInvData
         .filter(r => r.material_id === m.id && r.date <= dateLimit)
         .reduce((sum, r) => sum + r.quantity, 0)
       return { ...m, stock }
@@ -405,20 +428,25 @@ export default function InventoryPage() {
 
   const fetchActualStock = async (kind: AdjustKind, id: string): Promise<number> => {
     const today = format(new Date(), 'yyyy-MM-dd')
-    if (kind === 'product') {
+    const table = kind === 'product' ? 'inventory' : 'packaging_material_inventory'
+    const idCol = kind === 'product' ? 'product_id' : 'material_id'
+    // 分頁累加避免單一品項紀錄超過 1000 筆被截斷
+    let total = 0
+    const PAGE = 1000
+    let from = 0
+    while (true) {
       const { data } = await supabase
-        .from('inventory')
+        .from(table)
         .select('quantity')
-        .eq('product_id', id)
+        .eq(idCol, id)
         .lte('date', today)
-      return (data ?? []).reduce((sum, r) => sum + (r.quantity ?? 0), 0)
+        .range(from, from + PAGE - 1)
+      const rows = (data ?? []) as { quantity: number }[]
+      total += rows.reduce((sum, r) => sum + (r.quantity ?? 0), 0)
+      if (rows.length < PAGE) break
+      from += PAGE
     }
-    const { data } = await supabase
-      .from('packaging_material_inventory')
-      .select('quantity')
-      .eq('material_id', id)
-      .lte('date', today)
-    return (data ?? []).reduce((sum, r) => sum + (r.quantity ?? 0), 0)
+    return total
   }
 
   const openAdjustDialog = async (target: AdjustTarget) => {

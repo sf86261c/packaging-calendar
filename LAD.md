@@ -430,6 +430,43 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-05-04 — 修復 1000 筆 limit 截斷導致庫存數字不準（嚴重 bug）
+
+**症狀**：使用者下訂單後，包材庫存頁面數字未變動。RPC 寫入正確（`packaging_material_inventory` 確實有負數紀錄），但 inventory page 算出來的 D+N stock 仍是舊值。
+
+**Root cause**：
+- Supabase REST API 預設 `max-rows = 1000`，超過會被截斷
+- `inventory` / `packaging_material_inventory` 表累積紀錄超過 1000 筆（驗證時 `inventoryQueryRange: "0-999/1193"`）
+- `inventory page` 與 `line-notify API` 用單次 query + `.in().lte()` 抓所有紀錄做 client-side aggregation，前 1000 筆之後的紀錄被丟棄 → 漏掉部分 outbound 紀錄 → SUM 錯誤
+- 哪 193 筆被丟取決於 PostgREST 的回傳順序（無 ORDER BY 時依 storage page 順序），可能是新訂單也可能是舊資料
+
+**修法**：所有「跨多 product/material 的 aggregation query」都加分頁迴圈
+- `src/app/inventory/page.tsx`：`fetchAll` 中對 `inventory` 與 `packaging_material_inventory` 兩個 query 加 `.range(from, from+999)` 迴圈累加
+- `src/app/inventory/page.tsx`：`fetchActualStock`（修正當前數量 dialog）同樣分頁
+- `src/app/api/line-notify/route.ts`：兩個 query 同樣分頁
+
+**驗證流程**（Playwright 端對端）：
+1. 登入後在月曆頁建測試訂單：旋轉筒-經典原味 ×1 + 包裝四季童話
+2. 直接打 Supabase REST API 確認 RPC 已寫入 6 筆 packaging_material_inventory outbound（含 4 個帶 packaging_style_id 的 specific 與 2 個 universal 配方）
+3. 庫存頁顯示的數字未變 → confirmed bug
+4. 修完後分頁累加 1193 筆紀錄，數字應正確反映 −831（原 −830 + 新訂單 −1）
+
+**取捨**
+- 短期：分頁是最快修法，每頁 1000 筆，1193 筆只多打 1 次 query，效能影響可接受
+- 中長期可優化：寫 RPC 在 server 做 aggregation，回傳每個 material/product 的累計庫存（避免傳輸所有 row 給 client）
+
+**未動的部分**
+- `dashboard/page.tsx` 統計圖表也用相似邏輯，可能有同樣 bug 但影響小（顯示性質），下次再修
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| inventory + packaging_material_inventory 分頁 fetch | `src/app/inventory/page.tsx` |
+| 同上 | `src/app/api/line-notify/route.ts` |
+
+---
+
 ### 2026-05-04 — 移除 tube_pkg name-match 路徑，旋轉筒包裝消耗全交 product_material_usage
 
 **承接前一筆**：使用者已在設定頁為三個旋轉筒口味 + 三個包裝款式設定好 `product_material_usage`（同名包材會自動扣），舊的 hardcoded 路徑可清。

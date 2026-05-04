@@ -39,18 +39,31 @@ export async function GET() {
       const maxLead = Math.max(...products.map(p => (p as { lead_time_days?: number }).lead_time_days ?? 15))
       const maxDate = addDaysISO(maxLead)
       const productIds = products.map(p => p.id)
-      const { data: invData } = await supabase
-        .from('inventory')
-        .select('product_id, quantity, date')
-        .lte('date', maxDate)
-        .in('product_id', productIds)
+
+      // 分頁抓取避免 Supabase 1000 筆 limit 截斷
+      type InvRow = { product_id: string; quantity: number; date: string }
+      const invData: InvRow[] = []
+      const PAGE = 1000
+      let from = 0
+      while (true) {
+        const { data } = await supabase
+          .from('inventory')
+          .select('product_id, quantity, date')
+          .lte('date', maxDate)
+          .in('product_id', productIds)
+          .range(from, from + PAGE - 1)
+        const rows = (data ?? []) as InvRow[]
+        invData.push(...rows)
+        if (rows.length < PAGE) break
+        from += PAGE
+      }
 
       for (const p of products) {
         const lead = (p as { lead_time_days?: number }).lead_time_days ?? 15
         const leadDate = addDaysISO(lead)
         const stock = invData
-          ?.filter(r => r.product_id === p.id && r.date <= leadDate)
-          .reduce((sum: number, r: { quantity: number }) => sum + r.quantity, 0) ?? 0
+          .filter(r => r.product_id === p.id && r.date <= leadDate)
+          .reduce((sum: number, r: { quantity: number }) => sum + r.quantity, 0)
         const safety = (p as { safety_stock?: number }).safety_stock ?? 100
         if (stock < safety) {
           lowProducts.push({ name: p.name, stock, safety, leadTime: lead })
@@ -71,18 +84,30 @@ export async function GET() {
       const maxDate = addDaysISO(maxLead)
       const materialIds = materials.map(m => m.id)
 
-      const { data: matInvData } = await supabase
-        .from('packaging_material_inventory')
-        .select('material_id, quantity, date')
-        .lte('date', maxDate)
-        .in('material_id', materialIds)
+      // 分頁抓取避免 Supabase 1000 筆 limit 截斷
+      type MatInvRow = { material_id: string; quantity: number; date: string }
+      const matInvData: MatInvRow[] = []
+      const PAGE = 1000
+      let from = 0
+      while (true) {
+        const { data } = await supabase
+          .from('packaging_material_inventory')
+          .select('material_id, quantity, date')
+          .lte('date', maxDate)
+          .in('material_id', materialIds)
+          .range(from, from + PAGE - 1)
+        const rows = (data ?? []) as MatInvRow[]
+        matInvData.push(...rows)
+        if (rows.length < PAGE) break
+        from += PAGE
+      }
 
       for (const mat of materials) {
         const leadDays = mat.lead_time_days ?? 7
         const leadDate = addDaysISO(leadDays)
         const stock = matInvData
-          ?.filter(r => r.material_id === mat.id && r.date <= leadDate)
-          .reduce((sum: number, r: { quantity: number }) => sum + r.quantity, 0) ?? 0
+          .filter(r => r.material_id === mat.id && r.date <= leadDate)
+          .reduce((sum: number, r: { quantity: number }) => sum + r.quantity, 0)
 
         if (stock < mat.safety_stock) {
           lowMaterials.push({ name: mat.name, stock, safety: mat.safety_stock, leadTime: leadDays })
