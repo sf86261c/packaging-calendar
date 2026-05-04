@@ -433,6 +433,35 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-05-04 — 庫存轉移改為可輸入數量（部分轉移）
+
+**需求**：原本「庫存轉移 →」按鈕一鍵把全部水源轉到主庫存。改為跳出 dialog 讓 user 自由輸入轉移量，支援部分轉移。
+
+**設計**
+- 卡片按鈕從直接執行 → 改為 `openTransferDialog`
+- 新 transfer dialog UI：
+  - 顯示水源庫存（read-only）
+  - 「轉移數量」input：預設帶入完整水源量、可改少；validate `0 < qty <= 水源量`
+  - 即時預覽：「轉移後現有 / 轉移後水源 / 總庫存（不變）」三行
+  - Enter 快速確認；超量或 0 時按鈕 disable
+- 確認執行：
+  1. INSERT inbound record (`quantity = +qty`)
+  2. UPDATE `water_source_quantity = 原值 - qty`
+  3. 寫 activity log（轉移數量、水源剩餘）
+- 總庫存不變的不變式仍成立（base + qty + (water - qty) = base + water）
+
+**取捨**
+- 預設帶入完整水源量：常見情境是「全部轉移」一鍵搞定；要部分轉時改少即可
+- 仍然是兩段 await（INSERT + UPDATE），中途斷線可能 inbound 寫了但水源沒扣 → 錯誤訊息有提示「轉移已寫入但水源仍是舊值」+ fetchAll 還原 UI；後續若需要原子性可包進 RPC
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| openTransferDialog + handleConfirmTransfer + transfer dialog UI | `src/app/inventory/page.tsx` |
+
+---
+
 ### 2026-05-04 — 包材水源庫存（總庫存 = 現有 + 水源、入庫到水源、庫存轉移）
 
 **需求**：每個包材可選「水源有庫存」，勾選後輸入水源數量；總庫存 = 現有 + 水源 → 用總庫存比對 D+N；包材入庫時可選「入庫到水源」；卡片上「庫存轉移」按鈕把水源轉到主庫存（總數不變）。
