@@ -29,6 +29,7 @@ interface ProductStock {
   safety_stock: number
   lead_time_days: number
   show_in_inventory: boolean
+  sort_order: number
 }
 
 interface MaterialStock {
@@ -604,7 +605,12 @@ export default function InventoryPage() {
 
   // ─── Cookie visibility toggle ─────────────────
 
-  const cookies = products.filter(p => p.category === 'cookie')
+  const cookies = products.filter(p => p.category === 'cookie').sort((a, b) => {
+    const sa = a.sort_order ?? 0
+    const sb = b.sort_order ?? 0
+    if (sa !== sb) return sa - sb
+    return a.name.localeCompare(b.name)
+  })
   const cookiesHidden = cookies.length > 0 && cookies.every(c => !c.show_in_inventory)
 
   const toggleCookiesVisible = async () => {
@@ -622,8 +628,15 @@ export default function InventoryPage() {
 
   // ─── Derived ──────────────────────────────────
 
-  const cakeBars = products.filter(p => p.category === 'cake_bar')
-  const activeMaterials = materials.filter(m => m.is_active)
+  const bySortOrder = <T extends { sort_order?: number; name: string }>(a: T, b: T) => {
+    const sa = a.sort_order ?? 0
+    const sb = b.sort_order ?? 0
+    if (sa !== sb) return sa - sb
+    return a.name.localeCompare(b.name)
+  }
+
+  const cakeBars = products.filter(p => p.category === 'cake_bar').sort(bySortOrder)
+  const activeMaterials = materials.filter(m => m.is_active).sort(bySortOrder)
   const inactiveMaterials = materials.filter(m => !m.is_active)
   const lowMatCount = activeMaterials.filter(m => m.stock < m.safety_stock).length
 
