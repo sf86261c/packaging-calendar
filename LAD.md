@@ -430,6 +430,28 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-05-04 — Dashboard 修 1000 筆 limit + 改「本月訂單」為「本月訂購人數」
+
+**1000 筆分頁修復**（與前一筆同源）
+- `dashboard/page.tsx` 兩個 query 加分頁迴圈：本月 orders（含嵌套 packaging_styles + order_items）與本月 sample 的 stock_adjustment_items
+- 單月訂單數小機率超過 1000，但仍補完 cover
+
+**「本月訂單」→「本月訂購人數」**
+- 卡片標題改名，下方文字改「人（同分批/追加算 1）」
+- 計算邏輯：以 `batch_group_id` 為去重 key，UUID 相同算 1 筆；無 batch_group_id 的訂單則以 `order.id` 為 key（獨立訂單每筆 1）
+- 為什麼這樣設計：
+  - 同 `batch_group_id` 一定是同客戶的分批/追加群（migration 020 設計），算 1 人合理
+  - `batch_group_id` 為 NULL 的訂單可能是「同名但獨立操作」的訂單，不該強制視為同 1 人 → 用 order id 為 key 保持原本筆數
+  - 「非相同客戶」勾選會主動分配新 UUID，避免被舊邏輯誤合併
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| orders + stock_adjustment_items 分頁、訂購人數去重、卡片改名 | `src/app/dashboard/page.tsx` |
+
+---
+
 ### 2026-05-04 — 修復 1000 筆 limit 截斷導致庫存數字不準（嚴重 bug）
 
 **症狀**：使用者下訂單後，包材庫存頁面數字未變動。RPC 寫入正確（`packaging_material_inventory` 確實有負數紀錄），但 inventory page 算出來的 D+N stock 仍是舊值。

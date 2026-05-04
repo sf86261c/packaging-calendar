@@ -43,17 +43,41 @@ export default function DashboardPage() {
       const ms = format(monthStart, 'yyyy-MM-dd')
       const me = format(monthEnd, 'yyyy-MM-dd')
 
-      const { data: orders } = await supabase
-        .from('orders')
-        .select(`
-          id, status, printed, order_date,
-          cake_pkg:packaging_styles!orders_cake_packaging_id_fkey(name),
-          tube_pkg:packaging_styles!orders_tube_packaging_id_fkey(name),
-          single_pkg:packaging_styles!orders_single_cake_packaging_id_fkey(name),
-          order_items(quantity, product:products(name, category))
-        `)
-        .gte('order_date', ms)
-        .lte('order_date', me)
+      // Supabase max-rows=1000 → 分頁累加避免單月訂單超過 1000 被截斷
+      type OrderRow = {
+        id: string
+        status: string
+        printed: boolean
+        order_date: string
+        batch_group_id: string | null
+        cake_pkg: { name: string } | null
+        tube_pkg: { name: string } | null
+        single_pkg: { name: string } | null
+        order_items: { quantity: number; product: { name: string; category: string } | null }[]
+      }
+      const orders: OrderRow[] = []
+      {
+        const PAGE = 1000
+        let from = 0
+        while (true) {
+          const { data } = await supabase
+            .from('orders')
+            .select(`
+              id, status, printed, order_date, batch_group_id,
+              cake_pkg:packaging_styles!orders_cake_packaging_id_fkey(name),
+              tube_pkg:packaging_styles!orders_tube_packaging_id_fkey(name),
+              single_pkg:packaging_styles!orders_single_cake_packaging_id_fkey(name),
+              order_items(quantity, product:products(name, category))
+            `)
+            .gte('order_date', ms)
+            .lte('order_date', me)
+            .range(from, from + PAGE - 1)
+          const rows = (data ?? []) as unknown as OrderRow[]
+          orders.push(...rows)
+          if (rows.length < PAGE) break
+          from += PAGE
+        }
+      }
 
       let totalOrders = 0
       let totalCakes = 0
@@ -80,7 +104,12 @@ export default function DashboardPage() {
       }
 
       if (orders) {
-        totalOrders = orders.length
+        // 訂購人數：以 batch_group_id 去重（同分批/追加群算 1），無 batch_group_id 的訂單以 order id 為 key（獨立訂單每筆 1）
+        const groupKeys = new Set<string>()
+        for (const o of orders) {
+          groupKeys.add(o.batch_group_id ?? o.id)
+        }
+        totalOrders = groupKeys.size
         for (const o of orders as any[]) {
           if (!o.printed) pendingCount++
 
@@ -142,25 +171,36 @@ export default function DashboardPage() {
         .gte('date', ms)
         .lte('date', me)
 
-      // 本月試吃品項分布
-      const { data: sampleItemsData } = await supabase
-        .from('stock_adjustment_items')
-        .select(`
-          product_id,
-          quantity,
-          deduct_mode,
-          stock_adjustments!inner(date, adjustment_type)
-        `)
-        .eq('stock_adjustments.adjustment_type', 'sample')
-        .gte('stock_adjustments.date', ms)
-        .lte('stock_adjustments.date', me)
+      // 本月試吃品項分布（分頁累加避免 1000 筆 limit）
+      type SampleItemRow = { product_id: string; quantity: number }
+      const sampleItemsData: SampleItemRow[] = []
+      {
+        const PAGE = 1000
+        let from = 0
+        while (true) {
+          const { data } = await supabase
+            .from('stock_adjustment_items')
+            .select(`
+              product_id,
+              quantity,
+              deduct_mode,
+              stock_adjustments!inner(date, adjustment_type)
+            `)
+            .eq('stock_adjustments.adjustment_type', 'sample')
+            .gte('stock_adjustments.date', ms)
+            .lte('stock_adjustments.date', me)
+            .range(from, from + PAGE - 1)
+          const rows = (data ?? []) as unknown as SampleItemRow[]
+          sampleItemsData.push(...rows)
+          if (rows.length < PAGE) break
+          from += PAGE
+        }
+      }
 
       const sampleAgg: Record<string, number> = {}
-      if (sampleItemsData) {
-        type Row = { product_id: string; quantity: number }
-        for (const row of sampleItemsData as unknown as Row[]) {
-          sampleAgg[row.product_id] = (sampleAgg[row.product_id] || 0) + row.quantity
-        }
+      for (const row of sampleItemsData) {
+        if (!row.product_id) continue
+        sampleAgg[row.product_id] = (sampleAgg[row.product_id] || 0) + row.quantity
       }
 
       // Resolve product names
@@ -221,8 +261,8 @@ export default function DashboardPage() {
       {/* Top 4 stat cards */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500">本月訂單</CardTitle></CardHeader>
-          <CardContent><div className="text-3xl font-bold">{stats.totalOrders}</div><p className="text-xs text-gray-500">筆</p></CardContent>
+          <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500">本月訂購人數</CardTitle></CardHeader>
+          <CardContent><div className="text-3xl font-bold">{stats.totalOrders}</div><p className="text-xs text-gray-500">人（同分批/追加算 1）</p></CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm text-gray-500">蛋糕出貨</CardTitle></CardHeader>
