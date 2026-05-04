@@ -188,32 +188,6 @@ export function OrderFormDialog({
   const pkgName = (id: string) => packagingStyles.find((p: any) => p.id === id)?.name || '選擇'
   const brandName = (id: string) => brandingStyles.find((b: any) => b.id === id)?.name || '選擇'
 
-  const calculateDeductions = (itemEntries: [string, number][], tubePackagingId?: string) => {
-    const deductions: Record<string, number> = calculateIngredientDeductions(itemEntries, recipes)
-    const missingTubePkg: string[] = []
-
-    let totalTubes = 0
-    for (const [productId, qty] of itemEntries) {
-      if (qty <= 0) continue
-      const product = products.find((p: any) => p.id === productId)
-      if (product?.category === 'tube') totalTubes += qty
-    }
-
-    if (tubePackagingId && totalTubes > 0) {
-      const pkgStyleName = packagingStyles.find(ps => ps.id === tubePackagingId)?.name
-      if (pkgStyleName) {
-        const tubePkg = products.find((p: any) => p.category === 'tube_pkg' && p.name === pkgStyleName)
-        if (tubePkg) {
-          deductions[tubePkg.id] = (deductions[tubePkg.id] || 0) + totalTubes
-        } else {
-          missingTubePkg.push(pkgStyleName)
-        }
-      }
-    }
-
-    return { deductions, missingTubePkg }
-  }
-
   const calculateMaterialDeductions = (
     itemEntries: [string, number][],
     orderCakePackagingId?: string,
@@ -292,7 +266,7 @@ export function OrderFormDialog({
         }
       }
 
-      const { deductions: invDeductions, missingTubePkg } = calculateDeductions(itemEntries, formTubePackaging || undefined)
+      const invDeductions = calculateIngredientDeductions(itemEntries, recipes)
       const matResult = calculateMaterialDeductions(
         itemEntries,
         formCakePackaging || undefined,
@@ -350,19 +324,11 @@ export function OrderFormDialog({
       }
       await logActivity(activityAction, `order:${orderId}`, meta)
 
-      if (onWarning) {
-        const sections: string[] = []
-        if (matResult.missingCombos.length > 0) {
-          const lines = matResult.missingCombos.map(
-            c => `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`,
-          )
-          sections.push(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
-        }
-        if (missingTubePkg.length > 0) {
-          const lines = missingTubePkg.map(n => `· ${n}`)
-          sections.push(`以下旋轉筒包裝款式找不到對應的 tube_pkg 產品（已停用或名稱不符），未扣減包裝庫存：\n${lines.join('\n')}`)
-        }
-        if (sections.length > 0) onWarning(sections.join('\n\n'))
+      if (onWarning && matResult.missingCombos.length > 0) {
+        const lines = matResult.missingCombos.map(
+          c => `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`,
+        )
+        onWarning(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
       }
 
       onOpenChange(false)

@@ -204,28 +204,12 @@ export default function CalendarPage() {
 
       const totalIngredient: Record<string, number> = { ...directIngredient }
       const totalMaterial: Record<string, number> = { ...directMaterial }
-      const adjMissingTubePkg: string[] = []
       let adjMissingMaterial: { productName: string; packagingName: string | null }[] = []
 
       if (finishedEntries.length > 0) {
         const ingr = calculateIngredientDeductions(finishedEntries, recipes)
         for (const [k, v] of Object.entries(ingr)) {
           totalIngredient[k] = (totalIngredient[k] || 0) + v
-        }
-        // tube_pkg 特例（散單/試吃選旋轉筒也要扣包裝庫存）
-        for (const [productId, qty] of finishedEntries) {
-          const product = products.find((p) => p.id === productId)
-          if (product?.category !== 'tube') continue
-          const pkgStyleId = finishedPackaging[productId]
-          if (!pkgStyleId) continue
-          const pkgName = packagingStyles.find((ps) => ps.id === pkgStyleId)?.name
-          if (!pkgName) continue
-          const tubePkgProduct = products.find((p) => p.category === 'tube_pkg' && p.name === pkgName)
-          if (tubePkgProduct) {
-            totalIngredient[tubePkgProduct.id] = (totalIngredient[tubePkgProduct.id] || 0) + qty
-          } else if (!adjMissingTubePkg.includes(pkgName)) {
-            adjMissingTubePkg.push(pkgName)
-          }
         }
         const matResult = calcMaterialDeductionsHelper(
           finishedEntries,
@@ -240,19 +224,12 @@ export default function CalendarPage() {
         adjMissingMaterial = matResult.missingCombos
       }
 
-      // 包材警示（沿用月曆頁的 materialWarning）
-      const sections: string[] = []
       if (adjMissingMaterial.length > 0) {
         const lines = adjMissingMaterial.map((c) =>
           `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`,
         )
-        sections.push(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
+        setMaterialWarning(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
       }
-      if (adjMissingTubePkg.length > 0) {
-        const lines = adjMissingTubePkg.map((n) => `· ${n}`)
-        sections.push(`以下旋轉筒包裝款式找不到對應的 tube_pkg 產品（已停用或名稱不符），未扣減包裝庫存：\n${lines.join('\n')}`)
-      }
-      if (sections.length > 0) setMaterialWarning(sections.join('\n\n'))
 
       await replaceAdjustmentInventory(supabase, adjustmentId, totalIngredient, totalMaterial, todayStr)
 

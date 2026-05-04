@@ -245,6 +245,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `026_fix_auth_search_path.sql` | 修正 sign_up / sign_in search_path 為 `public, extensions`，解決 pgcrypto `gen_salt does not exist` |
 | `027_stock_adjustment_material.sql` | stock_adjustment_items 加 material_id（試吃/耗損可選包材）、product_id 改 nullable、互斥 CHECK |
 | `028_packaging_material_categories.sql` | 新增包材分類表 + packaging_materials.category_id（自訂分類區塊用） |
+| `029_deactivate_tube_pkg.sql` | 停用 tube_pkg 三筆產品（四季童話 / 銀河探險 / 樂園馬戲），改由 product_material_usage 接手包裝消耗 |
 
 ## 檔案結構
 
@@ -428,6 +429,37 @@ ALTER TABLE stock_adjustments
 ```
 
 ## 變更紀錄
+
+### 2026-05-04 — 移除 tube_pkg name-match 路徑，旋轉筒包裝消耗全交 product_material_usage
+
+**承接前一筆**：使用者已在設定頁為三個旋轉筒口味 + 三個包裝款式設定好 `product_material_usage`（同名包材會自動扣），舊的 hardcoded 路徑可清。
+
+**移除的程式碼**
+- `order-form-dialog.tsx`：移除 `calculateDeductions` 函式（原本 = `calculateIngredientDeductions` + tube_pkg name-match），handleSave 改直接用 `calculateIngredientDeductions`；移除 `missingTubePkg` 警示分支
+- `calendar/[date]/page.tsx`：同上；`showInventoryWarnings` 拿掉第二個 `missingTubePkg` 參數；handleSplitConfirm 各 split/append 計算點改用 `calculateIngredientDeductions`；handleSaveAdjustment 移除 finishedEntries 中 tube → tube_pkg name-match 的迴圈
+- `calendar/page.tsx`：handleSaveAdjustment 同上，移除 `adjMissingTubePkg` 與相關警示
+
+**Migration 029（待 Dashboard 執行）**：把三筆 tube_pkg product 設 `is_active=false`，既有 inventory 紀錄保留以便回溯，但不再顯示或被寫入。
+
+**保留**
+- `lib/stock.ts:57` 防禦性 skip（cake_bar/tube_pkg 不算包材消耗）—— 即使 tube_pkg 全停用也保留，避免未來資料異常
+- `lib/types.ts` 的 `ProductCategory` 仍含 `'tube_pkg'`（DB CHECK 仍允許）
+- 設定頁 / stock-adjustment-dialog 的「原料」mode 下拉仍可選 tube_pkg category，但因 `is_active=false` 過濾後不會出現
+
+**取捨**
+- 完全資料驅動：使用者在 `/settings` 編輯 tube + packaging_style 對應的包材消耗，不必再改程式碼
+- 缺點：使用者必須先在「包材」建好同名包材且在設定頁配對好 `product_material_usage`，否則訂單下旋轉筒不會扣到任何包裝庫存（會跳「未設定包材對照」警示）
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| Migration 029（待 Dashboard 執行） | `supabase/migrations/029_deactivate_tube_pkg.sql`（新增） |
+| 移除 calculateDeductions 與 missingTubePkg 警示 | `src/components/order-form-dialog.tsx` |
+| 同上 + showInventoryWarnings 簡化 + 各 split/append 計算點 + handleSaveAdjustment 的 tube_pkg 特例 | `src/app/calendar/[date]/page.tsx` |
+| handleSaveAdjustment 移除 tube_pkg 特例與警示 | `src/app/calendar/page.tsx` |
+
+---
 
 ### 2026-05-04 — 庫存頁與叫貨通知不再顯示「旋轉筒包裝」(tube_pkg)
 

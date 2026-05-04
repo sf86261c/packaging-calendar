@@ -364,35 +364,6 @@ export default function DayOrderPage() {
     setDialogOpen(true)
   }
 
-  // ─── Inventory deduction ────────────────────────────
-
-  const calculateDeductions = (itemEntries: [string, number][], tubePackagingId?: string) => {
-    const deductions: Record<string, number> = calculateIngredientDeductions(itemEntries, recipes)
-    const missingTubePkg: string[] = []
-
-    let totalTubes = 0
-    for (const [productId, qty] of itemEntries) {
-      if (qty <= 0) continue
-      const product = products.find((p: any) => p.id === productId)
-      if (product?.category === 'tube') totalTubes += qty
-    }
-
-    if (tubePackagingId && totalTubes > 0) {
-      const pkgStyleName = packagingStyles.find((ps) => ps.id === tubePackagingId)?.name
-      if (pkgStyleName) {
-        const tubePkg = products.find((p: any) => p.category === 'tube_pkg' && p.name === pkgStyleName)
-        if (tubePkg) {
-          deductions[tubePkg.id] = (deductions[tubePkg.id] || 0) + totalTubes
-        } else {
-          // 名稱對不上或產品已停用 → 提示用戶
-          missingTubePkg.push(pkgStyleName)
-        }
-      }
-    }
-
-    return { deductions, missingTubePkg }
-  }
-
   // ─── Packaging material deduction ─────────────────────
 
   const calculateMaterialDeductions = (
@@ -419,20 +390,12 @@ export default function DayOrderPage() {
 
   const showInventoryWarnings = (
     combos: { productName: string; packagingName: string | null }[],
-    missingTubePkg: string[] = [],
   ) => {
-    const sections: string[] = []
-    if (combos.length > 0) {
-      const lines = combos.map(c =>
-        `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`
-      )
-      sections.push(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
-    }
-    if (missingTubePkg.length > 0) {
-      const lines = missingTubePkg.map(n => `· ${n}`)
-      sections.push(`以下旋轉筒包裝款式找不到對應的 tube_pkg 產品（已停用或名稱不符），未扣減包裝庫存：\n${lines.join('\n')}`)
-    }
-    if (sections.length > 0) setMaterialWarning(sections.join('\n\n'))
+    if (combos.length === 0) return
+    const lines = combos.map(c =>
+      `· ${c.productName}${c.packagingName ? ` — ${c.packagingName}` : ''}`
+    )
+    setMaterialWarning(`以下組合尚未設定包材對照，未扣減包材：\n${lines.join('\n')}`)
   }
 
   // ─── Save (add or edit) ─────────────────────────────
@@ -495,7 +458,7 @@ export default function DayOrderPage() {
         }
       }
 
-      const { deductions, missingTubePkg } = calculateDeductions(itemEntries, formTubePackaging || undefined)
+      const deductions = calculateIngredientDeductions(itemEntries, recipes)
       const matResult = calculateMaterialDeductions(
         itemEntries,
         formCakePackaging || undefined,
@@ -504,7 +467,7 @@ export default function DayOrderPage() {
       )
       // RPC：reverse + apply 在 server 端為單一 transaction（用 formDate，編輯時可能改了日期）
       await replaceOrderInventory(supabase, orderId, deductions, matResult.deductions, formDate)
-      showInventoryWarnings(matResult.missingCombos, missingTubePkg)
+      showInventoryWarnings(matResult.missingCombos)
 
       resetForm()
       setDialogOpen(false)
@@ -707,10 +670,7 @@ export default function DayOrderPage() {
 
       // 5. inventory 重算（原訂單 + 各分批訂單）
       const origItemEntries = Object.entries(newPool).filter(([, q]) => q > 0) as [string, number][]
-      const { deductions: origIngr, missingTubePkg: missOrig } = calculateDeductions(
-        origItemEntries,
-        formTubePackaging || undefined,
-      )
+      const origIngr = calculateIngredientDeductions(origItemEntries, recipes)
       const origMat = calculateMaterialDeductions(
         origItemEntries,
         formCakePackaging || undefined,
@@ -719,7 +679,6 @@ export default function DayOrderPage() {
       )
       await replaceOrderInventory(supabase, editingOrderId, origIngr, origMat.deductions, formDate)
 
-      const allMissingTubePkg = [...missOrig]
       const allMissingCombos = [...origMat.missingCombos]
       for (const info of newOrderInfos) {
         // append 訂單若帶 override 則用之；split 訂單沿用 form 全欄位
@@ -730,10 +689,7 @@ export default function DayOrderPage() {
         const tubeForCalc = o && 'tubePackagingId' in o
           ? (o.tubePackagingId || undefined)
           : (formTubePackaging || undefined)
-        const { deductions: ingr, missingTubePkg: missN } = calculateDeductions(
-          info.itemEntries,
-          tubeForCalc,
-        )
+        const ingr = calculateIngredientDeductions(info.itemEntries, recipes)
         const mat = calculateMaterialDeductions(
           info.itemEntries,
           cakeForCalc,
@@ -741,10 +697,9 @@ export default function DayOrderPage() {
           formSingleCakePackaging,
         )
         await replaceOrderInventory(supabase, info.id, ingr, mat.deductions, info.date)
-        allMissingTubePkg.push(...missN)
         allMissingCombos.push(...mat.missingCombos)
       }
-      showInventoryWarnings(allMissingCombos, [...new Set(allMissingTubePkg)])
+      showInventoryWarnings(allMissingCombos)
 
       // 6. 寫操作紀錄（分批 / 追加 分別 log）
       const customer = formName.trim() || '未命名'
@@ -840,32 +795,15 @@ export default function DayOrderPage() {
         }
       }
 
-      // 整合 ingredient = direct + finished 透過 recipe 展開 + tube_pkg 特例
+      // 整合 ingredient = direct + finished 透過 recipe 展開
       const totalIngredient: Record<string, number> = { ...directIngredient }
       const totalMaterial: Record<string, number> = { ...directMaterial }
-      const adjMissingTubePkg: string[] = []
       let adjMissingMaterial: { productName: string; packagingName: string | null }[] = []
 
       if (finishedEntries.length > 0) {
         const ingr = calculateIngredientDeductions(finishedEntries, recipes)
         for (const [k, v] of Object.entries(ingr)) {
           totalIngredient[k] = (totalIngredient[k] || 0) + v
-        }
-
-        // tube_pkg 特例：與訂單路徑對齊（散單/試吃選旋轉筒也要扣包裝庫存）
-        for (const [productId, qty] of finishedEntries) {
-          const product = products.find((p: any) => p.id === productId)
-          if (product?.category !== 'tube') continue
-          const pkgStyleId = finishedPackaging[productId]
-          if (!pkgStyleId) continue
-          const pkgName = packagingStyles.find((ps: any) => ps.id === pkgStyleId)?.name
-          if (!pkgName) continue
-          const tubePkgProduct = products.find((p: any) => p.category === 'tube_pkg' && p.name === pkgName)
-          if (tubePkgProduct) {
-            totalIngredient[tubePkgProduct.id] = (totalIngredient[tubePkgProduct.id] || 0) + qty
-          } else if (!adjMissingTubePkg.includes(pkgName)) {
-            adjMissingTubePkg.push(pkgName)
-          }
         }
 
         const matResult = calcMaterialDeductionsHelper(
@@ -880,7 +818,7 @@ export default function DayOrderPage() {
         }
         adjMissingMaterial = matResult.missingCombos
       }
-      showInventoryWarnings(adjMissingMaterial, adjMissingTubePkg)
+      showInventoryWarnings(adjMissingMaterial)
 
       // RPC：reverse + apply 為 atomic
       await replaceAdjustmentInventory(supabase, adjustmentId, totalIngredient, totalMaterial, dateStr)
