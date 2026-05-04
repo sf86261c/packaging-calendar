@@ -122,6 +122,12 @@ export default function InventoryPage() {
   const [adjustNote, setAdjustNote] = useState('')
   const [adjustLoading, setAdjustLoading] = useState(false)
 
+  // Water source transfer dialog
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferTarget, setTransferTarget] = useState<MaterialStock | null>(null)
+  const [transferQty, setTransferQty] = useState('')
+  const [transferLoading, setTransferLoading] = useState(false)
+
   // Inline edit (per-product safety / leadTime)
   const [editingSafetyId, setEditingSafetyId] = useState<string | null>(null)
   const [editingSafetyValue, setEditingSafetyValue] = useState('')
@@ -351,29 +357,55 @@ export default function InventoryPage() {
     setMaterialInboundOpen(false); setSaving(false); fetchAll()
   }
 
-  const handleTransferWaterSource = async (m: MaterialStock) => {
+  const openTransferDialog = (m: MaterialStock) => {
     if (!isAdmin) return
     const water = m.water_source_quantity ?? 0
     if (water <= 0) { alert('水源庫存為 0，無需轉移'); return }
-    if (!confirm(`確定將「${m.name}」水源庫存 ${water} ${m.unit} 轉移到主庫存？\n（總庫存不變，水源歸零、主庫存 +${water}）`)) return
+    setTransferTarget(m)
+    setTransferQty(String(water))
+    setTransferOpen(true)
+  }
+
+  const handleConfirmTransfer = async () => {
+    if (!isAdmin || !transferTarget) return
+    const m = transferTarget
+    const water = m.water_source_quantity ?? 0
+    const qty = parseInt(transferQty, 10)
+    if (Number.isNaN(qty) || qty <= 0) { alert('請輸入大於 0 的整數'); return }
+    if (qty > water) { alert(`輸入超過水源庫存（${water}）`); return }
+
+    setTransferLoading(true)
     const today = format(new Date(), 'yyyy-MM-dd')
-    // 1. 寫一筆 inbound 紀錄（quantity=+W）
+    // 1. 寫一筆 inbound 紀錄（quantity = +qty）
     const insertRes = await supabase.from('packaging_material_inventory').insert({
       material_id: m.id, type: 'inbound', date: today,
-      quantity: water,
+      quantity: qty,
       reference_note: 'water_source_transfer',
     })
-    if (insertRes.error) { alert(`轉移失敗：${insertRes.error.message}`); return }
-    // 2. 水源歸零
+    if (insertRes.error) {
+      setTransferLoading(false)
+      alert(`轉移失敗：${insertRes.error.message}`)
+      return
+    }
+    // 2. 水源扣除轉移量
+    const newWater = water - qty
     const updateRes = await supabase
       .from('packaging_materials')
-      .update({ water_source_quantity: 0 })
+      .update({ water_source_quantity: newWater })
       .eq('id', m.id)
-    if (updateRes.error) { alert(`水源歸零失敗（轉移已寫入但水源仍有舊值）：${updateRes.error.message}`); fetchAll(); return }
+    if (updateRes.error) {
+      setTransferLoading(false)
+      alert(`水源更新失敗（轉移已寫入但水源仍是舊值）：${updateRes.error.message}`)
+      fetchAll()
+      return
+    }
     await logActivity('水源庫存轉移', `material:${m.id}`, {
       包材: m.name,
-      轉移數量: water,
+      轉移數量: qty,
+      水源剩餘: newWater,
     })
+    setTransferLoading(false)
+    setTransferOpen(false)
     fetchAll()
   }
 
@@ -915,7 +947,7 @@ export default function InventoryPage() {
               </span>
               {isAdmin && (m.water_source_quantity ?? 0) > 0 && (
                 <button
-                  onClick={() => handleTransferWaterSource(m)}
+                  onClick={() => openTransferDialog(m)}
                   className="rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
                   title="把水源庫存轉移到主庫存（總庫存不變）"
                 >
@@ -1411,6 +1443,74 @@ export default function InventoryPage() {
               {saving ? '儲存中...' : '儲存變更'}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Water Source Transfer Dialog ── */}
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>水源庫存轉移</DialogTitle>
+          </DialogHeader>
+          {transferTarget && (() => {
+            const water = transferTarget.water_source_quantity ?? 0
+            const inputQty = parseInt(transferQty, 10)
+            const validQty = !Number.isNaN(inputQty) && inputQty > 0 && inputQty <= water
+            const remaining = validQty ? water - inputQty : water
+            const newBase = validQty
+              ? transferTarget.base_stock + inputQty
+              : transferTarget.base_stock
+            return (
+              <div className="space-y-4 pt-2">
+                <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
+                  把水源庫存轉移到主庫存。總庫存不變、水源 −N、現有 +N。
+                </div>
+                <div>
+                  <Label className="text-xs text-gray-500">品項</Label>
+                  <div className="mt-1 text-sm font-medium">
+                    {transferTarget.name}
+                    <span className="ml-1 text-xs text-gray-500">（{transferTarget.unit}）</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs text-gray-500">水源庫存</Label>
+                    <div className="mt-1 flex h-9 items-center rounded-md border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700">
+                      {water.toLocaleString()}
+                    </div>
+                  </div>
+                  <div>
+                    <Label>轉移數量 *</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={water}
+                      value={transferQty}
+                      onChange={e => setTransferQty(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && validQty) handleConfirmTransfer() }}
+                      autoFocus
+                    />
+                    <p className="mt-1 text-[10px] text-gray-400">最多 {water.toLocaleString()}</p>
+                  </div>
+                </div>
+                {validQty && (
+                  <div className="rounded-md border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600 space-y-0.5">
+                    <div>轉移後現有：<span className="font-semibold text-foreground">{newBase.toLocaleString()}</span> {transferTarget.unit}</div>
+                    <div>轉移後水源：<span className="font-semibold text-foreground">{remaining.toLocaleString()}</span> {transferTarget.unit}</div>
+                    <div className="text-gray-400">總庫存不變：{(newBase + remaining).toLocaleString()} {transferTarget.unit}</div>
+                  </div>
+                )}
+                <Button
+                  className="w-full"
+                  onClick={handleConfirmTransfer}
+                  disabled={transferLoading || !validQty}
+                >
+                  {transferLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  確認轉移
+                </Button>
+              </div>
+            )
+          })()}
         </DialogContent>
       </Dialog>
 
