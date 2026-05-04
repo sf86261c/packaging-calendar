@@ -130,7 +130,7 @@ export default function InventoryPage() {
         .from('products')
         .select('id, name, category, sort_order, safety_stock, lead_time_days, show_in_inventory')
         .eq('is_active', true)
-        .in('category', ['cake_bar', 'tube_pkg', 'cookie'])
+        .in('category', ['cake_bar', 'cookie'])
         .order('sort_order'),
       supabase.from('packaging_materials').select('*').order('name'),
       supabase
@@ -534,7 +534,6 @@ export default function InventoryPage() {
   // ─── Derived ──────────────────────────────────
 
   const cakeBars = products.filter(p => p.category === 'cake_bar')
-  const tubePkgs = products.filter(p => p.category === 'tube_pkg')
   const activeMaterials = materials.filter(m => m.is_active)
   const inactiveMaterials = materials.filter(m => !m.is_active)
   const lowMatCount = activeMaterials.filter(m => m.stock < m.safety_stock).length
@@ -749,13 +748,6 @@ export default function InventoryPage() {
         <div className="mb-6">
           <h2 className="mb-3 text-lg font-semibold">蜂蜜蛋糕（條）</h2>
           <div className="grid gap-3 sm:grid-cols-3">{cakeBars.map(renderProductCard)}</div>
-        </div>
-      )}
-
-      {tubePkgs.length > 0 && (
-        <div className="mb-6">
-          <h2 className="mb-3 text-lg font-semibold">旋轉筒包裝</h2>
-          <div className="grid gap-3 sm:grid-cols-3">{tubePkgs.map(renderProductCard)}</div>
         </div>
       )}
 

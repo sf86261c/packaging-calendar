@@ -429,6 +429,35 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-05-04 — 庫存頁與叫貨通知不再顯示「旋轉筒包裝」(tube_pkg)
+
+**需求**：庫存頁的「旋轉筒包裝」區塊（四季童話 / 銀河探險 / 樂園馬戲）冗餘——使用者偏好直接在「包材」區塊看同名包材剩餘數量。
+
+**設計**
+- `inventory/page.tsx`：products fetch 從 `IN ('cake_bar', 'tube_pkg', 'cookie')` 改為 `IN ('cake_bar', 'cookie')`，render 移除 tubePkgs section
+- `api/line-notify/route.ts`：products 查詢同步排除 tube_pkg，不再對 tube_pkg 發叫貨警示
+
+**未動的部分（重要）**
+- DB 中 tube_pkg 產品仍然存在且 active
+- 訂單下「旋轉筒-XXX」品項時，`order-form-dialog.tsx:202-209` 仍會 name-match 同名 tube_pkg 產品扣減其 inventory（背景持續累計）
+- 若日後想徹底移除 tube_pkg，需另外做：
+  1. 改 calculateDeductions 把 tube_pkg name-match 換成 packaging_material name-match（或走 product_material_usage）
+  2. 把 tube_pkg 三筆 product 設 `is_active=false`
+  3. 用戶在「包材」新增「四季童話 / 銀河探險 / 樂園馬戲」三筆包材
+
+**取捨**
+- 純 UI 隱藏，背景邏輯不動 → 風險最低、可隨時還原
+- 缺點：tube_pkg 庫存仍會被扣但無人看、無告警；要看到「旋轉筒包材」反映訂單扣減，使用者需自行新增包材並到設定頁設 `product_material_usage`
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| products fetch 排除 tube_pkg、render 移除區塊 | `src/app/inventory/page.tsx` |
+| 叫貨通知 products 查詢排除 tube_pkg | `src/app/api/line-notify/route.ts` |
+
+---
+
 ### 2026-05-04 — 唱歌貓咪 widget 移到 AppShell（全頁面共用）
 
 **需求**：原本只有月曆頁顯示唱歌貓咪，希望切換任一頁面（統計/庫存/紀錄/設定…）都在同一位置看到。

@@ -31,7 +31,7 @@ export async function GET() {
       .select('id, name, category, safety_stock, lead_time_days, show_in_inventory')
       .eq('is_active', true)
       .eq('show_in_inventory', true)
-      .in('category', ['cake_bar', 'tube_pkg', 'cookie'])
+      .in('category', ['cake_bar', 'cookie'])
 
     const lowProducts: { name: string; stock: number; safety: number; leadTime: number }[] = []
 
