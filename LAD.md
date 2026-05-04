@@ -243,6 +243,8 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `024_app_users_auth.sql` | app_users + sign_up/sign_in RPC（pgcrypto bcrypt）+ seed admin/admin888 |
 | `025_activity_logs.sql` | activity_logs 表 + log_activity / cleanup_old_activity_logs RPC（30 天自動清理） |
 | `026_fix_auth_search_path.sql` | 修正 sign_up / sign_in search_path 為 `public, extensions`，解決 pgcrypto `gen_salt does not exist` |
+| `027_stock_adjustment_material.sql` | stock_adjustment_items 加 material_id（試吃/耗損可選包材）、product_id 改 nullable、互斥 CHECK |
+| `028_packaging_material_categories.sql` | 新增包材分類表 + packaging_materials.category_id（自訂分類區塊用） |
 
 ## 檔案結構
 
@@ -426,6 +428,51 @@ ALTER TABLE stock_adjustments
 ```
 
 ## 變更紀錄
+
+### 2026-05-04 — 庫存卡可修正實際數量 + 包材自訂分類
+
+**需求**
+1. 庫存卡每張都要能改「目前實際數量」以即時修正盤點誤差（非 D+N 後的數量）
+2. 包材區塊要支援自訂分類（區塊名由使用者新增），可把各種包材歸類到對應區塊（例如「蜂蜜蛋糕區」「曲奇餅乾區」）
+
+**設計**
+
+1. **修正實際數量（誤差校正）**
+   - 卡片數值旁加「✏️ 修正」鈕（admin only），開 Adjust Dialog
+   - Dialog 顯示兩個數字：
+     - **目前實際數量** = `SUM(quantity) WHERE date ≤ today`（不含未來訂單預扣，現算現抓）
+     - **修正為**（使用者輸入新值）+ 即時顯示差額
+   - 確認時寫一筆 `inventory` / `packaging_material_inventory` 記錄：`type='adjustment', date=today, quantity=新值-舊實際, reference_note='manual_adjust:備註'`
+   - 該記錄會自動進入 D+N 累積（today ≤ today+N）→ 卡片上的 D+N 預估同步修正
+   - 寫入「操作紀錄」`修正實際庫存`，metadata 含 `類型 / 名稱 / 原實際數量 / 新實際數量 / 差額 / 備註`
+   - 產品/包材共用同一支 dialog（`AdjustTarget = { kind: 'product'|'material', id, name, unit? }`）
+
+2. **包材自訂分類（Migration 028）**
+   - 新表 `packaging_material_categories(id, name UNIQUE, sort_order, created_at)`
+   - `packaging_materials.category_id UUID NULL REFERENCES ... ON DELETE SET NULL`（刪分類不會刪包材）
+   - 包材區塊改為「按分類分組」渲染：每個分類自成 sub-section，標題列含「重新命名」「刪除」icon；沒分類的包材歸到「未分類」section
+   - 標題列旁加「＋ 新增分類」鈕（admin only）→ 開 Add Category Dialog
+   - 新增/編輯包材 Dialog 加「分類」下拉（`未分類` 為預設選項）
+   - Realtime 監聽 `packaging_material_categories` + `packaging_materials` 變動，多人協作即時同步
+
+**取捨**
+- 修正用「寫一筆 adjustment 記錄」而非「直接覆寫過往 inventory」：保留稽核軌跡（誰、何時、原值、新值）+ 不破壞既有累積式設計 + 操作紀錄頁可查
+- 「實際當前庫存」每次開 dialog 即時抓（不在 fetchAll 預先計算）：避免每次切頁都跑兩次 SUM；修正使用頻率低
+- 分類採「軟連結」（`ON DELETE SET NULL`）：刪分類時包材歸「未分類」，不會誤刪業務資料
+- 分類用獨立表而非 enum：使用者要能任意新增/重新命名
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| Migration 028（待 Dashboard 執行） | `supabase/migrations/028_packaging_material_categories.sql`（新增） |
+| `PackagingMaterialCategory` 介面 + `PackagingMaterial.category_id` | `src/lib/types.ts` |
+| 庫存頁加修正按鈕、Adjust Dialog、分類分組渲染、Add/Edit/Delete Category、新增/編輯包材 dialog 加分類下拉、Realtime 監聽包材+分類表 | `src/app/inventory/page.tsx` |
+
+**Migration（待 Dashboard 執行）**
+- `028_packaging_material_categories.sql` — 未執行前 `category_id` 欄位不存在，新增/編輯包材寫入 `category_id` 會 RLS 失敗；包材區塊全部歸「未分類」，分類 CRUD 失敗
+
+---
 
 ### 2026-04-28 — 唱歌貓咪 widget + LAD 品牌 logo + sidebar 重排版
 

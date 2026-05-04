@@ -3,10 +3,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useCurrentUserClient } from '@/lib/auth'
+import { logActivity } from '@/lib/activity'
 import { format, addDays } from 'date-fns'
 import {
   Loader2, Plus, Send, Pencil, Check, X, Package, AlertTriangle,
-  Trash2, Ban, Eye, EyeOff,
+  Trash2, Ban, Eye, EyeOff, Edit3, FolderPlus, Folder,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -37,7 +38,22 @@ interface MaterialStock {
   safety_stock: number
   lead_time_days: number
   is_active: boolean
+  category_id: string | null
   stock: number
+}
+
+interface MaterialCategoryRow {
+  id: string
+  name: string
+  sort_order: number
+}
+
+type AdjustKind = 'product' | 'material'
+interface AdjustTarget {
+  kind: AdjustKind
+  id: string
+  name: string
+  unit?: string
 }
 
 const leadDateStr = (days: number) => format(addDays(new Date(), days), 'yyyy-MM-dd')
@@ -68,6 +84,7 @@ export default function InventoryPage() {
   const [matUnit, setMatUnit] = useState('個')
   const [matSafety, setMatSafety] = useState('100')
   const [matLeadTime, setMatLeadTime] = useState('7')
+  const [matCategory, setMatCategory] = useState<string>('')
 
   const [matEditOpen, setMatEditOpen] = useState(false)
   const [matEditId, setMatEditId] = useState('')
@@ -75,6 +92,23 @@ export default function InventoryPage() {
   const [matEditUnit, setMatEditUnit] = useState('')
   const [matEditSafety, setMatEditSafety] = useState('')
   const [matEditLeadTime, setMatEditLeadTime] = useState('7')
+  const [matEditCategory, setMatEditCategory] = useState<string>('')
+
+  // Material categories
+  const [categories, setCategories] = useState<MaterialCategoryRow[]>([])
+  const [catAddOpen, setCatAddOpen] = useState(false)
+  const [catName, setCatName] = useState('')
+  const [catEditOpen, setCatEditOpen] = useState(false)
+  const [catEditId, setCatEditId] = useState('')
+  const [catEditName, setCatEditName] = useState('')
+
+  // Adjust actual stock dialog
+  const [adjustOpen, setAdjustOpen] = useState(false)
+  const [adjustTarget, setAdjustTarget] = useState<AdjustTarget | null>(null)
+  const [adjustCurrentActual, setAdjustCurrentActual] = useState<number>(0)
+  const [adjustNewValue, setAdjustNewValue] = useState('')
+  const [adjustNote, setAdjustNote] = useState('')
+  const [adjustLoading, setAdjustLoading] = useState(false)
 
   // Inline edit (per-product safety / leadTime)
   const [editingSafetyId, setEditingSafetyId] = useState<string | null>(null)
@@ -91,7 +125,7 @@ export default function InventoryPage() {
   const fetchAll = useCallback(async () => {
     setLoading(true)
 
-    const [prodsRes, matRes] = await Promise.all([
+    const [prodsRes, matRes, catRes] = await Promise.all([
       supabase
         .from('products')
         .select('id, name, category, sort_order, safety_stock, lead_time_days, show_in_inventory')
@@ -99,7 +133,14 @@ export default function InventoryPage() {
         .in('category', ['cake_bar', 'tube_pkg', 'cookie'])
         .order('sort_order'),
       supabase.from('packaging_materials').select('*').order('name'),
+      supabase
+        .from('packaging_material_categories')
+        .select('id, name, sort_order')
+        .order('sort_order')
+        .order('name'),
     ])
+
+    setCategories((catRes.data ?? []) as MaterialCategoryRow[])
 
     // Compute per-product stock at each product's leadDate
     type ProductRow = Omit<ProductStock, 'stock'>
@@ -167,6 +208,8 @@ export default function InventoryPage() {
       .channel('inventory-all')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => fetchRef.current())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'packaging_material_inventory' }, () => fetchRef.current())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'packaging_material_categories' }, () => fetchRef.current())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'packaging_materials' }, () => fetchRef.current())
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [])
@@ -254,8 +297,10 @@ export default function InventoryPage() {
       unit: matUnit,
       safety_stock: parseInt(matSafety) || 100,
       lead_time_days: parseInt(matLeadTime) || 7,
+      category_id: matCategory || null,
     })
     setMatName(''); setMatUnit('個'); setMatSafety('100'); setMatLeadTime('7')
+    setMatCategory('')
     setMatAddOpen(false); setSaving(false); fetchAll()
   }
 
@@ -266,6 +311,7 @@ export default function InventoryPage() {
     setMatEditUnit(m.unit)
     setMatEditSafety(String(m.safety_stock))
     setMatEditLeadTime(String(m.lead_time_days ?? 7))
+    setMatEditCategory(m.category_id ?? '')
     setMatEditOpen(true)
   }
 
@@ -278,6 +324,7 @@ export default function InventoryPage() {
       unit: matEditUnit,
       safety_stock: parseInt(matEditSafety) || 0,
       lead_time_days: parseInt(matEditLeadTime) || 7,
+      category_id: matEditCategory || null,
     }).eq('id', matEditId)
     setMatEditOpen(false); setSaving(false); fetchAll()
   }
@@ -294,6 +341,152 @@ export default function InventoryPage() {
   const handleToggleMatActive = async (id: string, isActive: boolean) => {
     if (!isAdmin) return
     await supabase.from('packaging_materials').update({ is_active: !isActive }).eq('id', id)
+    fetchAll()
+  }
+
+  // ─── Material category CRUD ───────────────────
+
+  const handleAddCategory = async () => {
+    if (!isAdmin) return
+    const name = catName.trim()
+    if (!name) return
+    setSaving(true)
+    const nextOrder = categories.length > 0
+      ? Math.max(...categories.map(c => c.sort_order ?? 0)) + 10
+      : 10
+    const { error } = await supabase.from('packaging_material_categories').insert({
+      name, sort_order: nextOrder,
+    })
+    setSaving(false)
+    if (error) { alert(`新增分類失敗：${error.message}`); return }
+    await logActivity('新增包材分類', null, { 名稱: name })
+    setCatName(''); setCatAddOpen(false); fetchAll()
+  }
+
+  const openCatEdit = (cat: MaterialCategoryRow) => {
+    if (!isAdmin) return
+    setCatEditId(cat.id)
+    setCatEditName(cat.name)
+    setCatEditOpen(true)
+  }
+
+  const handleEditCategory = async () => {
+    if (!isAdmin) return
+    const name = catEditName.trim()
+    if (!name || !catEditId) return
+    setSaving(true)
+    const { error } = await supabase
+      .from('packaging_material_categories')
+      .update({ name })
+      .eq('id', catEditId)
+    setSaving(false)
+    if (error) { alert(`重新命名失敗：${error.message}`); return }
+    await logActivity('編輯包材分類', `category:${catEditId}`, { 名稱: name })
+    setCatEditOpen(false); fetchAll()
+  }
+
+  const handleDeleteCategory = async (cat: MaterialCategoryRow) => {
+    if (!isAdmin) return
+    const count = materials.filter(m => m.category_id === cat.id).length
+    const msg = count > 0
+      ? `確定刪除分類「${cat.name}」？該分類下 ${count} 項包材會變成「未分類」（包材本身不會被刪除）。`
+      : `確定刪除分類「${cat.name}」？`
+    if (!confirm(msg)) return
+    const { error } = await supabase
+      .from('packaging_material_categories')
+      .delete()
+      .eq('id', cat.id)
+    if (error) { alert(`刪除分類失敗：${error.message}`); return }
+    await logActivity('刪除包材分類', `category:${cat.id}`, { 名稱: cat.name })
+    fetchAll()
+  }
+
+  // ─── Adjust actual stock (修正誤差) ────────────
+
+  const fetchActualStock = async (kind: AdjustKind, id: string): Promise<number> => {
+    const today = format(new Date(), 'yyyy-MM-dd')
+    if (kind === 'product') {
+      const { data } = await supabase
+        .from('inventory')
+        .select('quantity')
+        .eq('product_id', id)
+        .lte('date', today)
+      return (data ?? []).reduce((sum, r) => sum + (r.quantity ?? 0), 0)
+    }
+    const { data } = await supabase
+      .from('packaging_material_inventory')
+      .select('quantity')
+      .eq('material_id', id)
+      .lte('date', today)
+    return (data ?? []).reduce((sum, r) => sum + (r.quantity ?? 0), 0)
+  }
+
+  const openAdjustDialog = async (target: AdjustTarget) => {
+    if (!isAdmin) return
+    setAdjustTarget(target)
+    setAdjustNote('')
+    setAdjustOpen(true)
+    setAdjustLoading(true)
+    const actual = await fetchActualStock(target.kind, target.id)
+    setAdjustCurrentActual(actual)
+    setAdjustNewValue(String(actual))
+    setAdjustLoading(false)
+  }
+
+  const handleAdjustSubmit = async () => {
+    if (!isAdmin || !adjustTarget) return
+    const newVal = parseInt(adjustNewValue, 10)
+    if (Number.isNaN(newVal) || newVal < 0) {
+      alert('請輸入有效的非負整數')
+      return
+    }
+    const diff = newVal - adjustCurrentActual
+    if (diff === 0) { setAdjustOpen(false); return }
+
+    setAdjustLoading(true)
+    const today = format(new Date(), 'yyyy-MM-dd')
+    const note = adjustNote.trim()
+    const referenceNote = `manual_adjust:${note || '修正實際數量'}`
+
+    if (adjustTarget.kind === 'product') {
+      const { error } = await supabase.from('inventory').insert({
+        product_id: adjustTarget.id,
+        date: today,
+        type: 'adjustment',
+        quantity: diff,
+        reference_note: referenceNote,
+      })
+      if (error) {
+        alert(`修正失敗：${error.message}`)
+        setAdjustLoading(false)
+        return
+      }
+    } else {
+      const { error } = await supabase.from('packaging_material_inventory').insert({
+        material_id: adjustTarget.id,
+        date: today,
+        type: 'adjustment',
+        quantity: diff,
+        reference_note: referenceNote,
+      })
+      if (error) {
+        alert(`修正失敗：${error.message}`)
+        setAdjustLoading(false)
+        return
+      }
+    }
+
+    await logActivity('修正實際庫存', `${adjustTarget.kind}:${adjustTarget.id}`, {
+      類型: adjustTarget.kind === 'product' ? '產品' : '包材',
+      名稱: adjustTarget.name,
+      原實際數量: adjustCurrentActual,
+      新實際數量: newVal,
+      差額: diff,
+      備註: note || null,
+    })
+
+    setAdjustLoading(false)
+    setAdjustOpen(false)
     fetchAll()
   }
 
@@ -396,8 +589,19 @@ export default function InventoryPage() {
               {isLow && <Badge variant="destructive" className="text-xs">低庫存</Badge>}
             </div>
           </div>
-          <div className={`mt-2 text-3xl font-bold ${isLow ? 'text-red-600' : ''}`}>
-            {p.stock.toLocaleString()}
+          <div className="mt-2 flex items-baseline gap-2">
+            <div className={`text-3xl font-bold ${isLow ? 'text-red-600' : ''}`}>
+              {p.stock.toLocaleString()}
+            </div>
+            {isAdmin && (
+              <button
+                onClick={() => openAdjustDialog({ kind: 'product', id: p.id, name: p.name })}
+                className="ml-auto inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-600 hover:bg-blue-50 hover:text-blue-700"
+                title="修正實際數量（誤差校正）"
+              >
+                <Edit3 className="h-3 w-3" /> 修正
+              </button>
+            )}
           </div>
           <div className="mt-1 flex items-center gap-1 text-xs text-gray-500">
             <span>安全庫存:</span>
@@ -466,9 +670,20 @@ export default function InventoryPage() {
               )}
             </div>
           </div>
-          <div className={`mt-2 text-3xl font-bold ${isLow ? 'text-red-600' : ''}`}>
-            {m.stock.toLocaleString()}
-            <span className="ml-1 text-sm font-normal text-gray-500">{m.unit}</span>
+          <div className="mt-2 flex items-baseline gap-2">
+            <div className={`text-3xl font-bold ${isLow ? 'text-red-600' : ''}`}>
+              {m.stock.toLocaleString()}
+              <span className="ml-1 text-sm font-normal text-gray-500">{m.unit}</span>
+            </div>
+            {isAdmin && (
+              <button
+                onClick={() => openAdjustDialog({ kind: 'material', id: m.id, name: m.name, unit: m.unit })}
+                className="ml-auto inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-600 hover:bg-blue-50 hover:text-blue-700"
+                title="修正實際數量（誤差校正）"
+              >
+                <Edit3 className="h-3 w-3" /> 修正
+              </button>
+            )}
           </div>
           <div className="mt-1 text-xs text-gray-500">安全庫存: {m.safety_stock.toLocaleString()}</div>
           <div className="mt-2 h-2 w-full rounded-full bg-gray-200">
@@ -570,8 +785,20 @@ export default function InventoryPage() {
 
       {(activeMaterials.length > 0 || !loading) && (
         <div className="mb-6">
-          <h2 className="mb-3 text-lg font-semibold">包材</h2>
-          {activeMaterials.length === 0 ? (
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold">包材</h2>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCatAddOpen(true)}
+                className="h-7 text-xs"
+              >
+                <FolderPlus className="mr-1 h-3 w-3" /> 新增分類
+              </Button>
+            )}
+          </div>
+          {activeMaterials.length === 0 && categories.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-8 text-center">
                 <div className="mb-2 text-3xl">📦</div>
@@ -579,8 +806,63 @@ export default function InventoryPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {activeMaterials.map(renderMaterialCard)}
+            <div className="space-y-5">
+              {categories.map(cat => {
+                const catMats = activeMaterials.filter(m => m.category_id === cat.id)
+                return (
+                  <div key={cat.id}>
+                    <div className="mb-2 flex items-center gap-2">
+                      <Folder className="h-4 w-4 text-gray-500" />
+                      <h3 className="text-sm font-semibold text-gray-700">{cat.name}</h3>
+                      <span className="text-xs text-gray-400">({catMats.length})</span>
+                      {isAdmin && (
+                        <>
+                          <button
+                            onClick={() => openCatEdit(cat)}
+                            className="ml-1 text-gray-400 hover:text-blue-600"
+                            title="重新命名"
+                            aria-label={`重新命名 ${cat.name}`}
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCategory(cat)}
+                            className="text-gray-400 hover:text-red-600"
+                            title="刪除分類"
+                            aria-label={`刪除分類 ${cat.name}`}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {catMats.length === 0 ? (
+                      <p className="ml-6 text-xs text-gray-400">此分類尚無包材</p>
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                        {catMats.map(renderMaterialCard)}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+
+              {(() => {
+                const uncategorized = activeMaterials.filter(m => !m.category_id)
+                if (uncategorized.length === 0) return null
+                return (
+                  <div>
+                    <div className="mb-2 flex items-center gap-2">
+                      <Folder className="h-4 w-4 text-gray-400" />
+                      <h3 className="text-sm font-semibold text-gray-500">未分類</h3>
+                      <span className="text-xs text-gray-400">({uncategorized.length})</span>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {uncategorized.map(renderMaterialCard)}
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
           )}
         </div>
@@ -679,6 +961,27 @@ export default function InventoryPage() {
               <Label>名稱 *</Label>
               <Input value={matName} onChange={e => setMatName(e.target.value)} placeholder="e.g. 蜂蜜蛋糕盒" />
             </div>
+            <div>
+              <Label>分類</Label>
+              <Select
+                value={matCategory || '__none__'}
+                onValueChange={v => setMatCategory(!v || v === '__none__' ? '' : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue>
+                    {matCategory
+                      ? categories.find(c => c.id === matCategory)?.name ?? '未分類'
+                      : '未分類'}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">未分類</SelectItem>
+                  {categories.map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>單位</Label>
@@ -720,6 +1023,27 @@ export default function InventoryPage() {
               <Label>名稱 *</Label>
               <Input value={matEditName} onChange={e => setMatEditName(e.target.value)} />
             </div>
+            <div>
+              <Label>分類</Label>
+              <Select
+                value={matEditCategory || '__none__'}
+                onValueChange={v => setMatEditCategory(!v || v === '__none__' ? '' : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue>
+                    {matEditCategory
+                      ? categories.find(c => c.id === matEditCategory)?.name ?? '未分類'
+                      : '未分類'}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">未分類</SelectItem>
+                  {categories.map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>單位</Label>
@@ -748,6 +1072,126 @@ export default function InventoryPage() {
             <Button className="w-full" onClick={handleEditMaterial} disabled={saving || !matEditName.trim()}>
               {saving ? '儲存中...' : '儲存變更'}
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add Category Dialog ── */}
+      <Dialog open={catAddOpen} onOpenChange={setCatAddOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>新增包材分類</DialogTitle></DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div>
+              <Label>分類名稱 *</Label>
+              <Input
+                value={catName}
+                onChange={e => setCatName(e.target.value)}
+                placeholder="e.g. 蜂蜜蛋糕區、曲奇餅乾區"
+                onKeyDown={e => { if (e.key === 'Enter' && catName.trim()) handleAddCategory() }}
+                autoFocus
+              />
+              <p className="mt-1 text-xs text-gray-400">建立後在新增/編輯包材時可選擇此分類</p>
+            </div>
+            <Button className="w-full" onClick={handleAddCategory} disabled={saving || !catName.trim()}>
+              {saving ? '儲存中...' : '新增分類'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Category Dialog ── */}
+      <Dialog open={catEditOpen} onOpenChange={setCatEditOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>重新命名分類</DialogTitle></DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div>
+              <Label>分類名稱 *</Label>
+              <Input
+                value={catEditName}
+                onChange={e => setCatEditName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && catEditName.trim()) handleEditCategory() }}
+                autoFocus
+              />
+            </div>
+            <Button className="w-full" onClick={handleEditCategory} disabled={saving || !catEditName.trim()}>
+              {saving ? '儲存中...' : '儲存變更'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Adjust Actual Stock Dialog ── */}
+      <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>修正實際數量</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            {adjustTarget && (
+              <>
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                  ⚠️ 此功能用於修正盤點誤差。會寫入一筆當天的調整記錄（差額 = 新值 − 目前實際），未來 D+N 預估會自動同步。
+                </div>
+                <div>
+                  <Label className="text-xs text-gray-500">品項</Label>
+                  <div className="mt-1 text-sm font-medium">
+                    {adjustTarget.name}
+                    {adjustTarget.unit && <span className="ml-1 text-xs text-gray-500">（{adjustTarget.unit}）</span>}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs text-gray-500">目前實際數量</Label>
+                    <div className="mt-1 flex h-9 items-center rounded-md border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700">
+                      {adjustLoading && adjustNewValue === '' ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        adjustCurrentActual.toLocaleString()
+                      )}
+                    </div>
+                    <p className="mt-1 text-[10px] text-gray-400">截至今天，不含未來訂單預扣</p>
+                  </div>
+                  <div>
+                    <Label>修正為 *</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={adjustNewValue}
+                      onChange={e => setAdjustNewValue(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleAdjustSubmit() }}
+                      autoFocus
+                    />
+                    {(() => {
+                      const v = parseInt(adjustNewValue, 10)
+                      if (Number.isNaN(v)) return null
+                      const diff = v - adjustCurrentActual
+                      if (diff === 0) return <p className="mt-1 text-[10px] text-gray-400">無變動</p>
+                      return (
+                        <p className={`mt-1 text-[10px] ${diff > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          差額 {diff > 0 ? '+' : ''}{diff.toLocaleString()}
+                        </p>
+                      )
+                    })()}
+                  </div>
+                </div>
+                <div>
+                  <Label>原因 / 備註</Label>
+                  <Input
+                    value={adjustNote}
+                    onChange={e => setAdjustNote(e.target.value)}
+                    placeholder="e.g. 月底盤點發現少 10 個"
+                  />
+                </div>
+                <Button
+                  className="w-full"
+                  onClick={handleAdjustSubmit}
+                  disabled={adjustLoading || adjustNewValue === ''}
+                >
+                  {adjustLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  確認修正
+                </Button>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

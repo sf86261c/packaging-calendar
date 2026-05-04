@@ -71,12 +71,20 @@ export interface InventoryRecord {
   product?: Product
 }
 
+export interface PackagingMaterialCategory {
+  id: string
+  name: string
+  sort_order: number
+  created_at: string
+}
+
 export interface PackagingMaterial {
   id: string
   name: string
   unit: string
   safety_stock: number
   is_active: boolean
+  category_id: string | null
 }
 
 export interface PackagingMaterialInventory {
