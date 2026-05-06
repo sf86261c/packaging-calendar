@@ -433,6 +433,37 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-05-06 — 搜尋功能擴展：支援品項名稱搜尋
+
+**需求**：月曆右上 inline 搜尋框與 `/search` 完整搜尋頁原本只搜「客戶名」，user 要求能搜「包含特定品項的訂單」（例：輸入「經典原味」列出所有有該品項的訂單）。
+
+**設計**
+- 統一搜尋（同一輸入框，無模式切換）：每次 query 走三段
+  1. `products.name ilike %q%` → 取 product ids
+  2. `order_items.product_id IN (productIds)` → 取 order ids（distinct via Set）
+  3. 並行兩個 orders query：
+     - 客戶命中：`.ilike('customer_name', '%q%')`
+     - 品項命中：`.in('id', orderIdsByItem)`
+- Client-side merge dedup：同一 order id 用 Set 累加命中原因
+- 結果列加 badge：「客戶」灰底 / 「品項」藍底 — 同時命中時兩個都顯示
+- placeholder：「搜尋客戶...」→「搜尋客戶 / 品項...」；`/search` 標題：「客戶搜尋」→「訂單搜尋」
+- 月曆 inline 搜尋框寬度從 w-44 → w-52 容納新 placeholder
+
+**取捨**
+- 三段 query 而非 PostgREST 跨 nested table OR filter：PostgREST 對 nested filter 限制較多；分段邏輯清楚、容易維護
+- 多 2 段 query 的 latency 落在原本 180ms debounce 內，user 感知延遲不變
+- 結果筆數可能暴漲（如「經典」匹配大量品項）：popover 取前 10 筆 + 「查看完整結果 →」跳 `/search`；完整頁取前 50 筆（單路徑）
+- cake_bar / tube_pkg 類別產品（如「經典原味（條）」）名稱可能匹配但實務無人下單該類別 → 不會出現在 order_items → 不污染結果，無需特別過濾
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| inline 搜尋三段 query + reasonMap + UI badge + placeholder + 寬度 | `src/app/calendar/page.tsx` |
+| 完整搜尋頁同步 + 標題改「訂單搜尋」+ 結果卡 badge | `src/app/search/page.tsx` |
+
+---
+
 ### 2026-05-06 — 統計儀表板「包裝款式統計」改為盒數計算
 
 **需求**：原本「包裝款式統計」BarChart 是「該包裝在多少張訂單裡被選到」（次數），user 要求改為「該包裝對應品項的數量總和」（盒/個）。
@@ -1614,6 +1645,7 @@ metadata key 全中文：`客戶 / 日期 / 原日期 / 付款狀態 / 品項 / 
 - ✅ LINE 自動推播 UID 更新為 `U552a2551dfa5df627fb96623b9e750b9`（2026-04-28，已同步 .env.local + Vercel production env）
 - ✅ Migration 027 + 028 + 029 + 030 + 031 + 032 已執行（2026-05-06 — 試吃/耗損可選包材、包材自訂分類、停用 tube_pkg、包材排序、帳號權限系統、包材水源庫存）
 - ✅ 統計儀表板「包裝款式統計」改為盒數計算（2026-05-06 — pkgMap 按 cake/tube/single_cake 各 category quantity 累加，UI 文字改「使用數量 / 個」）
+- ✅ 搜尋功能擴展支援品項名稱（2026-05-06 — 月曆 inline 搜尋與 `/search` 完整頁同時搜「客戶 + 品項」，結果列加命中原因 badge）
 
 ## 環境資訊
 

@@ -35,6 +35,7 @@ interface SearchHit {
   items_summary: string
   printed: boolean
   paid: boolean
+  match_reasons: string[]
 }
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
@@ -76,7 +77,8 @@ export default function CalendarPage() {
     }
   }
 
-  // Debounced 即時搜尋（每次 keypress 後 180ms 執行 ilike 查詢）
+  // Debounced 即時搜尋（每次 keypress 後 180ms 執行）
+  // 同時搜「客戶名」與「品項名」：products.name ilike → order_items.product_id IN (...) → orders.id IN (...)
   useEffect(() => {
     const q = searchQuery.trim()
     if (!q) {
@@ -86,28 +88,75 @@ export default function CalendarPage() {
     }
     const timer = setTimeout(async () => {
       setSearchLoading(true)
-      const { data } = await supabase
-        .from('orders')
-        .select('id, customer_name, order_date, printed, paid, order_items(quantity, product:products(name))')
-        .ilike('customer_name', `%${q}%`)
-        .order('order_date', { ascending: false })
-        .limit(10)
-      if (data) {
-        const hits: SearchHit[] = data.map((o: any) => {
-          const items = (o.order_items || []).filter((i: any) => i.quantity > 0)
-          const summary = items.map((i: any) => `${i.product?.name ?? '?'}×${i.quantity}`).join(', ') || '無品項'
-          return {
-            id: o.id,
-            customer_name: o.customer_name,
-            order_date: o.order_date,
-            items_summary: summary,
-            printed: !!o.printed,
-            paid: !!o.paid,
-          }
-        })
-        setSearchResults(hits)
-        setSearchOpen(true)
+
+      // step 1: 找名稱含關鍵字的 product id
+      const { data: matchProducts } = await supabase
+        .from('products')
+        .select('id')
+        .ilike('name', `%${q}%`)
+      const productIds = (matchProducts ?? []).map((p: any) => p.id as string)
+
+      // step 2: 找 order_items 引用這些 product 的 order id
+      let orderIdsByItem: string[] = []
+      if (productIds.length > 0) {
+        const { data: matchItems } = await supabase
+          .from('order_items')
+          .select('order_id')
+          .in('product_id', productIds)
+        orderIdsByItem = Array.from(new Set((matchItems ?? []).map((i: any) => i.order_id as string)))
       }
+
+      const select = 'id, customer_name, order_date, printed, paid, order_items(quantity, product:products(name))'
+      const [byCustomer, byItem] = await Promise.all([
+        supabase
+          .from('orders')
+          .select(select)
+          .ilike('customer_name', `%${q}%`)
+          .order('order_date', { ascending: false })
+          .limit(15),
+        orderIdsByItem.length > 0
+          ? supabase
+              .from('orders')
+              .select(select)
+              .in('id', orderIdsByItem)
+              .order('order_date', { ascending: false })
+              .limit(15)
+          : Promise.resolve({ data: [] as any[] }),
+      ])
+
+      // merge dedup + 命中原因
+      const reasonMap = new Map<string, Set<string>>()
+      const orderMap = new Map<string, any>()
+      for (const o of (byCustomer.data ?? [])) {
+        orderMap.set(o.id, o)
+        if (!reasonMap.has(o.id)) reasonMap.set(o.id, new Set())
+        reasonMap.get(o.id)!.add('客戶')
+      }
+      for (const o of (byItem.data ?? [])) {
+        if (!orderMap.has(o.id)) orderMap.set(o.id, o)
+        if (!reasonMap.has(o.id)) reasonMap.set(o.id, new Set())
+        reasonMap.get(o.id)!.add('品項')
+      }
+
+      const merged = Array.from(orderMap.values())
+        .sort((a: any, b: any) => (b.order_date as string).localeCompare(a.order_date as string))
+        .slice(0, 10)
+
+      const hits: SearchHit[] = merged.map((o: any) => {
+        const items = (o.order_items || []).filter((i: any) => i.quantity > 0)
+        const summary = items.map((i: any) => `${i.product?.name ?? '?'}×${i.quantity}`).join(', ') || '無品項'
+        return {
+          id: o.id,
+          customer_name: o.customer_name,
+          order_date: o.order_date,
+          items_summary: summary,
+          printed: !!o.printed,
+          paid: !!o.paid,
+          match_reasons: Array.from(reasonMap.get(o.id) ?? []),
+        }
+      })
+      setSearchResults(hits)
+      setSearchOpen(true)
       setSearchLoading(false)
     }, 180)
     return () => clearTimeout(timer)
@@ -367,12 +416,12 @@ export default function CalendarPage() {
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 type="search"
-                placeholder="搜尋客戶..."
+                placeholder="搜尋客戶 / 品項..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onFocus={() => searchResults.length > 0 && setSearchOpen(true)}
-                className="h-9 w-44 pl-8 text-sm"
-                aria-label="搜尋客戶"
+                className="h-9 w-52 pl-8 text-sm"
+                aria-label="搜尋客戶或品項"
               />
               {searchLoading && (
                 <Loader2 className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-muted-foreground" />
@@ -392,8 +441,24 @@ export default function CalendarPage() {
                     onClick={() => handleSelectResult(r.order_date)}
                     className={`block w-full border-b border-border/50 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-accent ${r.printed ? 'bg-yellow-50/40' : ''}`}
                   >
-                    <div className="text-sm font-medium text-foreground">
-                      {r.customer_name}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-medium text-foreground">
+                        {r.customer_name}
+                      </div>
+                      <div className="flex flex-shrink-0 gap-1">
+                        {r.match_reasons.map((reason) => (
+                          <span
+                            key={reason}
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                              reason === '品項'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'bg-gray-100 text-gray-600'
+                            }`}
+                          >
+                            {reason}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {r.order_date} · {r.items_summary}

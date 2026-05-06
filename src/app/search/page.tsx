@@ -26,6 +26,7 @@ interface SearchResult {
   packaging_summary: string
   items_summary: string
   items: EditingOrder['items']
+  match_reasons: string[]
 }
 
 export default function SearchPage() {
@@ -48,60 +49,103 @@ export default function SearchPage() {
     setLoading(true)
     setSearched(true)
 
-    const { data } = await supabase
-      .from('orders')
-      .select(`
-        id, customer_name, order_date, status, printed, paid, batch_info,
-        cake_packaging_id, cake_branding_id, tube_packaging_id,
-        single_cake_packaging_id, single_cake_branding_text,
-        cake_pkg:packaging_styles!orders_cake_packaging_id_fkey(name),
-        tube_pkg:packaging_styles!orders_tube_packaging_id_fkey(name),
-        single_pkg:packaging_styles!orders_single_cake_packaging_id_fkey(name),
-        order_items(quantity, packaging_id, product:products(id, name, category))
-      `)
-      .ilike('customer_name', `%${q}%`)
-      .order('order_date', { ascending: false })
-      .limit(50)
+    // 同時搜「客戶名」與「品項名」：products.name ilike → order_items.product_id IN (...) → orders.id IN (...)
+    const { data: matchProducts } = await supabase
+      .from('products')
+      .select('id')
+      .ilike('name', `%${q}%`)
+    const productIds = (matchProducts ?? []).map((p: any) => p.id as string)
 
-    if (data) {
-      const rows: SearchResult[] = data.map((o: any) => {
-        const items = (o.order_items || [])
-          .filter((i: any) => i.quantity > 0)
-          .map((i: any) => ({
-            productId: i.product?.id || '',
-            name: i.product?.name || '?',
-            category: i.product?.category || '',
-            quantity: i.quantity,
-            packagingId: i.packaging_id || null,
-          }))
-        const itemsStr = items.map((i: any) => `${i.name} ×${i.quantity}`).join(', ')
-        const pkgs = [o.cake_pkg, o.tube_pkg, o.single_pkg]
-          .map((p: any) => p?.name).filter(Boolean).join(', ')
-        return {
-          id: o.id,
-          customer_name: o.customer_name,
-          order_date: o.order_date,
-          status: o.status,
-          printed: o.printed,
-          paid: !!o.paid,
-          batch_info: o.batch_info,
-          cake_packaging_id: o.cake_packaging_id,
-          cake_branding_id: o.cake_branding_id,
-          tube_packaging_id: o.tube_packaging_id,
-          single_cake_packaging_id: o.single_cake_packaging_id,
-          single_cake_branding_text: o.single_cake_branding_text,
-          packaging_summary: pkgs || '未指定包裝',
-          items_summary: itemsStr || '無品項',
-          items: items.map((i: any) => ({
-            productId: i.productId,
-            category: i.category,
-            quantity: i.quantity,
-            packagingId: i.packagingId,
-          })),
-        }
-      })
-      setResults(rows)
+    let orderIdsByItem: string[] = []
+    if (productIds.length > 0) {
+      const { data: matchItems } = await supabase
+        .from('order_items')
+        .select('order_id')
+        .in('product_id', productIds)
+      orderIdsByItem = Array.from(new Set((matchItems ?? []).map((i: any) => i.order_id as string)))
     }
+
+    const select = `
+      id, customer_name, order_date, status, printed, paid, batch_info,
+      cake_packaging_id, cake_branding_id, tube_packaging_id,
+      single_cake_packaging_id, single_cake_branding_text,
+      cake_pkg:packaging_styles!orders_cake_packaging_id_fkey(name),
+      tube_pkg:packaging_styles!orders_tube_packaging_id_fkey(name),
+      single_pkg:packaging_styles!orders_single_cake_packaging_id_fkey(name),
+      order_items(quantity, packaging_id, product:products(id, name, category))
+    `
+
+    const [byCustomer, byItem] = await Promise.all([
+      supabase
+        .from('orders')
+        .select(select)
+        .ilike('customer_name', `%${q}%`)
+        .order('order_date', { ascending: false })
+        .limit(50),
+      orderIdsByItem.length > 0
+        ? supabase
+            .from('orders')
+            .select(select)
+            .in('id', orderIdsByItem)
+            .order('order_date', { ascending: false })
+            .limit(50)
+        : Promise.resolve({ data: [] as any[] }),
+    ])
+
+    const reasonMap = new Map<string, Set<string>>()
+    const orderMap = new Map<string, any>()
+    for (const o of (byCustomer.data ?? [])) {
+      orderMap.set(o.id, o)
+      if (!reasonMap.has(o.id)) reasonMap.set(o.id, new Set())
+      reasonMap.get(o.id)!.add('客戶')
+    }
+    for (const o of (byItem.data ?? [])) {
+      if (!orderMap.has(o.id)) orderMap.set(o.id, o)
+      if (!reasonMap.has(o.id)) reasonMap.set(o.id, new Set())
+      reasonMap.get(o.id)!.add('品項')
+    }
+
+    const merged = Array.from(orderMap.values())
+      .sort((a: any, b: any) => (b.order_date as string).localeCompare(a.order_date as string))
+
+    const rows: SearchResult[] = merged.map((o: any) => {
+      const items = (o.order_items || [])
+        .filter((i: any) => i.quantity > 0)
+        .map((i: any) => ({
+          productId: i.product?.id || '',
+          name: i.product?.name || '?',
+          category: i.product?.category || '',
+          quantity: i.quantity,
+          packagingId: i.packaging_id || null,
+        }))
+      const itemsStr = items.map((i: any) => `${i.name} ×${i.quantity}`).join(', ')
+      const pkgs = [o.cake_pkg, o.tube_pkg, o.single_pkg]
+        .map((p: any) => p?.name).filter(Boolean).join(', ')
+      return {
+        id: o.id,
+        customer_name: o.customer_name,
+        order_date: o.order_date,
+        status: o.status,
+        printed: o.printed,
+        paid: !!o.paid,
+        batch_info: o.batch_info,
+        cake_packaging_id: o.cake_packaging_id,
+        cake_branding_id: o.cake_branding_id,
+        tube_packaging_id: o.tube_packaging_id,
+        single_cake_packaging_id: o.single_cake_packaging_id,
+        single_cake_branding_text: o.single_cake_branding_text,
+        packaging_summary: pkgs || '未指定包裝',
+        items_summary: itemsStr || '無品項',
+        items: items.map((i: any) => ({
+          productId: i.productId,
+          category: i.category,
+          quantity: i.quantity,
+          packagingId: i.packagingId,
+        })),
+        match_reasons: Array.from(reasonMap.get(o.id) ?? []),
+      }
+    })
+    setResults(rows)
     setLoading(false)
   }, [])
 
@@ -140,12 +184,12 @@ export default function SearchPage() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <h1 className="mb-6 text-2xl font-bold text-gray-900">🔍 客戶搜尋</h1>
+      <h1 className="mb-6 text-2xl font-bold text-gray-900">🔍 訂單搜尋</h1>
 
       <div className="relative mb-6">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
         <Input
-          placeholder="輸入客戶姓名..."
+          placeholder="輸入客戶姓名或品項名稱..."
           value={query}
           onChange={(e) => handleSearch(e.target.value)}
           className="pl-10 text-base"
@@ -176,7 +220,23 @@ export default function SearchPage() {
                   className="flex-1 cursor-pointer"
                   onClick={() => router.push(`/calendar/${r.order_date}`)}
                 >
-                  <div className="font-medium">{r.customer_name}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="font-medium">{r.customer_name}</div>
+                    <div className="flex gap-1">
+                      {r.match_reasons.map((reason) => (
+                        <span
+                          key={reason}
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            reason === '品項'
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-gray-100 text-gray-600'
+                          }`}
+                        >
+                          {reason}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                   <div className="text-sm text-gray-500">{r.order_date} · {r.items_summary}</div>
                   <div className="text-xs text-gray-400">
                     {r.packaging_summary}
@@ -206,7 +266,7 @@ export default function SearchPage() {
       )}
 
       {!searched && (
-        <p className="py-12 text-center text-gray-400">輸入客戶姓名開始搜尋</p>
+        <p className="py-12 text-center text-gray-400">輸入客戶姓名或品項名稱開始搜尋</p>
       )}
 
       <OrderFormDialog
