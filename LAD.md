@@ -433,6 +433,28 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-05-06 — 統計儀表板「包裝款式統計」改為盒數計算
+
+**需求**：原本「包裝款式統計」BarChart 是「該包裝在多少張訂單裡被選到」（次數），user 要求改為「該包裝對應品項的數量總和」（盒/個）。
+
+**設計**
+- pkgMap 累加邏輯改：在 order_items 迴圈中各自累加 cake/tube/single_cake 的 quantity，迴圈結束後按 cake_pkg / tube_pkg / single_pkg 分別把對應 category 的數量加進 pkgMap
+- 守門：對應 category 數量為 0 時不汙染 map（避免「選了包裝但沒下對應品項」的訂單虛增 0 條紀錄）
+- 三個 packaging slot 互不干擾：同一張訂單若同時有 cake + tube + single_cake，三個包裝各自累加自己 category 的數量
+- UI 文字：tooltip 從「次 / 使用次數」改為「個 / 使用數量」；Bar name 同步
+
+**取捨**
+- 統一用「個」而非「盒」：tube / single_cake 嚴格說是「個」、cake 是「盒」，統一單位較中性
+- 仍合併到同一個 pkgMap：同名包裝款式跨類別不太可能（packaging_styles 已有 category 欄位），即便發生也合理累計
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| pkgMap 邏輯重寫（按 category quantity 累加）+ tooltip/Bar name 文字 | `src/app/dashboard/page.tsx` |
+
+---
+
 ### 2026-05-04 — 庫存轉移改為可輸入數量（部分轉移）
 
 **需求**：原本「庫存轉移 →」按鈕一鍵把全部水源轉到主庫存。改為跳出 dialog 讓 user 自由輸入轉移量，支援部分轉移。
@@ -502,7 +524,7 @@ ALTER TABLE stock_adjustments
 
 | 變更 | 檔案 |
 |---|---|
-| Migration 032（待 Dashboard 執行） | `supabase/migrations/032_packaging_materials_water_source.sql`（新增） |
+| Migration 032（已執行 2026-05-06） | `supabase/migrations/032_packaging_materials_water_source.sql`（新增） |
 | PackagingMaterial 加水源欄位 | `src/lib/types.ts` |
 | MaterialStock 拆 base_stock/stock、UI 顯示水源、handler、入庫/編輯 dialog | `src/app/inventory/page.tsx` |
 | 叫貨通知用總庫存比對 | `src/app/api/line-notify/route.ts` |
@@ -572,7 +594,7 @@ ALTER TABLE stock_adjustments
 
 | 變更 | 檔案 |
 |---|---|
-| Migration 031（待 Dashboard 執行） | `supabase/migrations/031_app_users_permissions.sql`（新增） |
+| Migration 031（已執行 2026-05-06） | `supabase/migrations/031_app_users_permissions.sql`（新增） |
 | AuthUser permissions + helpers | `src/lib/auth.ts` |
 | nav 過濾 + URL guard | `src/components/app-shell.tsx` |
 | adjustment_only mode + + 鈕/試吃按鈕 gate | `src/app/calendar/page.tsx` |
@@ -616,7 +638,7 @@ ALTER TABLE stock_adjustments
 
 | 變更 | 檔案 |
 |---|---|
-| Migration 030（待 Dashboard 執行） | `supabase/migrations/030_packaging_materials_sort_order.sql`（新增） |
+| Migration 030（已執行 2026-05-06） | `supabase/migrations/030_packaging_materials_sort_order.sql`（新增） |
 | `PackagingMaterial.sort_order` | `src/lib/types.ts` |
 | 拖拉 state + handler + 兩個 render 函式加 drag handlers + 各 grid 傳 scope/listIds | `src/app/inventory/page.tsx` |
 
@@ -693,7 +715,7 @@ ALTER TABLE stock_adjustments
 - `calendar/[date]/page.tsx`：同上；`showInventoryWarnings` 拿掉第二個 `missingTubePkg` 參數；handleSplitConfirm 各 split/append 計算點改用 `calculateIngredientDeductions`；handleSaveAdjustment 移除 finishedEntries 中 tube → tube_pkg name-match 的迴圈
 - `calendar/page.tsx`：handleSaveAdjustment 同上，移除 `adjMissingTubePkg` 與相關警示
 
-**Migration 029（待 Dashboard 執行）**：把三筆 tube_pkg product 設 `is_active=false`，既有 inventory 紀錄保留以便回溯，但不再顯示或被寫入。
+**Migration 029（已執行 2026-05-06）**：把三筆 tube_pkg product 設 `is_active=false`，既有 inventory 紀錄保留以便回溯，但不再顯示或被寫入。
 
 **保留**
 - `lib/stock.ts:57` 防禦性 skip（cake_bar/tube_pkg 不算包材消耗）—— 即使 tube_pkg 全停用也保留，避免未來資料異常
@@ -708,7 +730,7 @@ ALTER TABLE stock_adjustments
 
 | 變更 | 檔案 |
 |---|---|
-| Migration 029（待 Dashboard 執行） | `supabase/migrations/029_deactivate_tube_pkg.sql`（新增） |
+| Migration 029（已執行 2026-05-06） | `supabase/migrations/029_deactivate_tube_pkg.sql`（新增） |
 | 移除 calculateDeductions 與 missingTubePkg 警示 | `src/components/order-form-dialog.tsx` |
 | 同上 + showInventoryWarnings 簡化 + 各 split/append 計算點 + handleSaveAdjustment 的 tube_pkg 特例 | `src/app/calendar/[date]/page.tsx` |
 | handleSaveAdjustment 移除 tube_pkg 特例與警示 | `src/app/calendar/page.tsx` |
@@ -804,7 +826,7 @@ ALTER TABLE stock_adjustments
 
 | 變更 | 檔案 |
 |---|---|
-| Migration 028（待 Dashboard 執行） | `supabase/migrations/028_packaging_material_categories.sql`（新增） |
+| Migration 028（已執行 2026-05-06） | `supabase/migrations/028_packaging_material_categories.sql`（新增） |
 | `PackagingMaterialCategory` 介面 + `PackagingMaterial.category_id` | `src/lib/types.ts` |
 | 庫存頁加修正按鈕、Adjust Dialog、分類分組渲染、Add/Edit/Delete Category、新增/編輯包材 dialog 加分類下拉、Realtime 監聽包材+分類表 | `src/app/inventory/page.tsx` |
 
@@ -934,7 +956,7 @@ ALTER TABLE stock_adjustments
 
 | 變更 | 檔案 |
 |---|---|
-| Migration 027（待 Dashboard 執行） | `supabase/migrations/027_stock_adjustment_material.sql`（新增） |
+| Migration 027（已執行 2026-05-06） | `supabase/migrations/027_stock_adjustment_material.sql`（新增） |
 | `StockAdjustmentItem` 型別擴充 | `src/lib/types.ts` |
 | Dialog 加 materials prop + UI prefix 邏輯 | `src/components/stock-adjustment-dialog.tsx` |
 | 月曆頁 fetch boxMaterials + handleSaveAdjustment 解析 prefix + 傳 materials | `src/app/calendar/page.tsx` |
@@ -1590,6 +1612,8 @@ metadata key 全中文：`客戶 / 日期 / 原日期 / 付款狀態 / 品項 / 
 - ✅ Migration 024 + 025 + 026 已執行（2026-04-28 — app_users 認證 + activity_logs + pgcrypto search_path 修正）
 - ✅ 庫存頁 admin guard：僅 admin 可編輯，非 admin 僅可查看（2026-04-28）
 - ✅ LINE 自動推播 UID 更新為 `U552a2551dfa5df627fb96623b9e750b9`（2026-04-28，已同步 .env.local + Vercel production env）
+- ✅ Migration 027 + 028 + 029 + 030 + 031 + 032 已執行（2026-05-06 — 試吃/耗損可選包材、包材自訂分類、停用 tube_pkg、包材排序、帳號權限系統、包材水源庫存）
+- ✅ 統計儀表板「包裝款式統計」改為盒數計算（2026-05-06 — pkgMap 按 cake/tube/single_cake 各 category quantity 累加，UI 文字改「使用數量 / 個」）
 
 ## 環境資訊
 

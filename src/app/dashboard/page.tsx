@@ -118,21 +118,27 @@ export default function DashboardPage() {
           // Count daily orders
           dailyOrderMap[orderDate] = (dailyOrderMap[orderDate] || 0) + 1
 
-          // Count packaging types
-          for (const pkg of [o.cake_pkg, o.tube_pkg, o.single_pkg]) {
-            const name = (pkg as any)?.name
-            if (name) pkgMap[name] = (pkgMap[name] || 0) + 1
-          }
+          // 各 category 在這張訂單的數量，給「包裝款式統計」按 category 累加用
+          let orderCakeQty = 0
+          let orderTubeQty = 0
+          let orderSingleCakeQty = 0
 
           for (const item of (o.order_items || [])) {
             const cat = item.product?.category
             const name = item.product?.name
-            if (cat === 'cake' || cat === 'single_cake') {
+            if (cat === 'cake') {
               totalCakes += item.quantity
+              orderCakeQty += item.quantity
+              dailyCakeMap[orderDate] = (dailyCakeMap[orderDate] || 0) + item.quantity
+            }
+            if (cat === 'single_cake') {
+              totalCakes += item.quantity
+              orderSingleCakeQty += item.quantity
               dailyCakeMap[orderDate] = (dailyCakeMap[orderDate] || 0) + item.quantity
             }
             if (cat === 'tube') {
               totalTubes += item.quantity
+              orderTubeQty += item.quantity
               dailyTubeMap[orderDate] = (dailyTubeMap[orderDate] || 0) + item.quantity
             }
             if (cat === 'cookie') {
@@ -140,6 +146,20 @@ export default function DashboardPage() {
               if (name) cookieMap[name] = (cookieMap[name] || 0) + item.quantity
               dailyCookieMap[orderDate] = (dailyCookieMap[orderDate] || 0) + item.quantity
             }
+          }
+
+          // 包裝款式統計：累加對應 category 的數量（不是「使用次數」）
+          const cakePkgName = (o.cake_pkg as any)?.name
+          if (cakePkgName && orderCakeQty > 0) {
+            pkgMap[cakePkgName] = (pkgMap[cakePkgName] || 0) + orderCakeQty
+          }
+          const tubePkgName = (o.tube_pkg as any)?.name
+          if (tubePkgName && orderTubeQty > 0) {
+            pkgMap[tubePkgName] = (pkgMap[tubePkgName] || 0) + orderTubeQty
+          }
+          const singlePkgName = (o.single_pkg as any)?.name
+          if (singlePkgName && orderSingleCakeQty > 0) {
+            pkgMap[singlePkgName] = (pkgMap[singlePkgName] || 0) + orderSingleCakeQty
           }
         }
       }
@@ -313,10 +333,10 @@ export default function DashboardPage() {
                     tick={{ fontSize: 12 }}
                   />
                   <Tooltip
-                    formatter={(value: any) => [`${value} 次`, '使用次數']}
+                    formatter={(value: any) => [`${value} 個`, '使用數量']}
                     contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }}
                   />
-                  <Bar dataKey="count" name="使用次數" radius={[0, 4, 4, 0]}>
+                  <Bar dataKey="count" name="使用數量" radius={[0, 4, 4, 0]}>
                     {stats.packagingStats.map((_, i) => (
                       <Cell key={`pkg-${i}`} fill={COLORS_SOFT[i % COLORS_SOFT.length]} />
                     ))}
