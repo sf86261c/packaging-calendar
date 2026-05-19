@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { createClient } from '@/lib/supabase'
 import { useCurrentUserClient } from '@/lib/auth'
 import { logActivity } from '@/lib/activity'
@@ -68,20 +69,30 @@ const leadDateStr = (days: number) => format(addDays(new Date(), days), 'yyyy-MM
 
 // 包材代表圖片縮圖：hover 停留 0.5 秒後浮層放大；移開立即收回；
 // 無圖片時顯示淡灰 Package 佔位（admin 可從編輯 dialog 上傳）
+// 浮層用 createPortal 渲染到 document.body，避開 Card 元件的 overflow-hidden 切掉
 function MaterialImageThumb({ url, name }: { url: string | null; name: string }) {
-  const [showLarge, setShowLarge] = useState(false)
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null)
+  const thumbRef = useRef<HTMLImageElement | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const onEnter = () => {
     if (!url) return
-    timerRef.current = setTimeout(() => setShowLarge(true), 500)
+    timerRef.current = setTimeout(() => {
+      const rect = thumbRef.current?.getBoundingClientRect()
+      if (!rect) return
+      // 浮層中心對齊縮圖中心，垂直放在縮圖下方 8px
+      setPopoverPos({
+        top: rect.bottom + 8,
+        left: rect.left + rect.width / 2,
+      })
+    }, 500)
   }
   const onLeave = () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current)
       timerRef.current = null
     }
-    setShowLarge(false)
+    setPopoverPos(null)
   }
 
   if (!url) {
@@ -93,15 +104,21 @@ function MaterialImageThumb({ url, name }: { url: string | null; name: string })
   }
 
   return (
-    <div className="relative shrink-0" onMouseEnter={onEnter} onMouseLeave={onLeave}>
+    <>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
+        ref={thumbRef}
         src={url}
         alt={`${name} 代表圖片`}
-        className="h-10 w-10 rounded border border-gray-200 object-cover"
+        className="h-10 w-10 shrink-0 rounded border border-gray-200 object-cover"
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
       />
-      {showLarge && (
-        <div className="pointer-events-none absolute left-1/2 top-12 z-50 -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-2 shadow-2xl">
+      {popoverPos && createPortal(
+        <div
+          className="pointer-events-none fixed z-[9999] -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-2 shadow-2xl"
+          style={{ top: popoverPos.top, left: popoverPos.left }}
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={url}
@@ -109,9 +126,10 @@ function MaterialImageThumb({ url, name }: { url: string | null; name: string })
             className="h-60 w-60 object-contain"
           />
           <div className="mt-1 text-center text-xs text-gray-500">{name}</div>
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   )
 }
 
