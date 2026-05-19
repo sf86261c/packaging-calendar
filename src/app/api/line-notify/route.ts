@@ -78,6 +78,8 @@ export async function GET() {
       .eq('is_active', true)
 
     const lowMaterials: { name: string; stock: number; safety: number; leadTime: number }[] = []
+    // 水源轉移建議：現有 < 安全/2 且水源 > 0；與 lowMaterials 互相獨立（總庫存可能仍足）
+    const waterTransferMaterials: { name: string; base: number; water: number; safety: number }[] = []
 
     if (materials && materials.length > 0) {
       const maxLead = Math.max(...materials.map(m => m.lead_time_days ?? 7))
@@ -114,12 +116,15 @@ export async function GET() {
         if (stock < m.safety_stock) {
           lowMaterials.push({ name: m.name, stock, safety: m.safety_stock, leadTime: leadDays })
         }
+        if (water > 0 && baseStock < m.safety_stock / 2) {
+          waterTransferMaterials.push({ name: m.name, base: baseStock, water, safety: m.safety_stock })
+        }
       }
     }
 
-    // ── No low stock → skip notification ──
-    if (lowProducts.length === 0 && lowMaterials.length === 0) {
-      return NextResponse.json({ ok: true, message: '所有庫存充足', notified: { products: 0, materials: 0 } })
+    // ── No low stock & no transfer suggestion → skip notification ──
+    if (lowProducts.length === 0 && lowMaterials.length === 0 && waterTransferMaterials.length === 0) {
+      return NextResponse.json({ ok: true, message: '所有庫存充足', notified: { products: 0, materials: 0, waterTransfer: 0 } })
     }
 
     // ── Build LINE message ──
@@ -137,6 +142,14 @@ export async function GET() {
       lines.push('【包材庫存】預計到貨日不足：')
       for (const m of lowMaterials) {
         lines.push(`• ${m.name}(D+${m.leadTime})：${m.stock.toLocaleString()} / 安全 ${m.safety.toLocaleString()}`)
+      }
+      lines.push('')
+    }
+
+    if (waterTransferMaterials.length > 0) {
+      lines.push('【建議從水源轉移】現有低於安全/2：')
+      for (const m of waterTransferMaterials) {
+        lines.push(`• ${m.name}：現有 ${m.base.toLocaleString()} / 水源 ${m.water.toLocaleString()} / 安全 ${m.safety.toLocaleString()}`)
       }
       lines.push('')
     }
@@ -165,7 +178,11 @@ export async function GET() {
 
     return NextResponse.json({
       ok: true,
-      notified: { products: lowProducts.length, materials: lowMaterials.length },
+      notified: {
+        products: lowProducts.length,
+        materials: lowMaterials.length,
+        waterTransfer: waterTransferMaterials.length,
+      },
     })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : '未知錯誤'

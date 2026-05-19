@@ -88,6 +88,7 @@ export interface PackagingMaterial {
   sort_order: number
   has_water_source: boolean
   water_source_quantity: number
+  image_url: string | null
 }
 
 export interface PackagingMaterialInventory {

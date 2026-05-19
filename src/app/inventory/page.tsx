@@ -43,6 +43,7 @@ interface MaterialStock {
   sort_order: number
   has_water_source: boolean
   water_source_quantity: number
+  image_url: string | null
   // base = 現有庫存 (date <= today + lead_time)；
   // stock = base + water_source_quantity 用於 isLow 比對 / 顯示「總庫存」
   base_stock: number
@@ -64,6 +65,55 @@ interface AdjustTarget {
 }
 
 const leadDateStr = (days: number) => format(addDays(new Date(), days), 'yyyy-MM-dd')
+
+// 包材代表圖片縮圖：hover 停留 0.5 秒後浮層放大；移開立即收回；
+// 無圖片時顯示淡灰 Package 佔位（admin 可從編輯 dialog 上傳）
+function MaterialImageThumb({ url, name }: { url: string | null; name: string }) {
+  const [showLarge, setShowLarge] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const onEnter = () => {
+    if (!url) return
+    timerRef.current = setTimeout(() => setShowLarge(true), 500)
+  }
+  const onLeave = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+    setShowLarge(false)
+  }
+
+  if (!url) {
+    return (
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-dashed border-gray-200 text-gray-300" title="尚未設定圖片">
+        <Package className="h-4 w-4" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="relative shrink-0" onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url}
+        alt={`${name} 代表圖片`}
+        className="h-10 w-10 rounded border border-gray-200 object-cover"
+      />
+      {showLarge && (
+        <div className="pointer-events-none absolute left-1/2 top-12 z-50 -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-2 shadow-2xl">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt={`${name} 放大預覽`}
+            className="h-60 w-60 object-contain"
+          />
+          <div className="mt-1 text-center text-xs text-gray-500">{name}</div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function InventoryPage() {
   const supabase = createClient()
@@ -105,6 +155,11 @@ export default function InventoryPage() {
   const [matEditCategory, setMatEditCategory] = useState<string>('')
   const [matEditHasWater, setMatEditHasWater] = useState(false)
   const [matEditWaterQty, setMatEditWaterQty] = useState('0')
+
+  // 包材代表圖片（add / edit dialog 共用）
+  const [matImageUrl, setMatImageUrl] = useState<string | null>(null)
+  const [matEditImageUrl, setMatEditImageUrl] = useState<string | null>(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
 
   // Material categories
   const [categories, setCategories] = useState<MaterialCategoryRow[]>([])
@@ -423,9 +478,11 @@ export default function InventoryPage() {
       category_id: matCategory || null,
       has_water_source: matHasWater,
       water_source_quantity: matHasWater ? (parseInt(matWaterQty) || 0) : 0,
+      image_url: matImageUrl,
     })
     setMatName(''); setMatUnit('個'); setMatSafety('100'); setMatLeadTime('7')
     setMatCategory(''); setMatHasWater(false); setMatWaterQty('0')
+    setMatImageUrl(null)
     setMatAddOpen(false); setSaving(false); fetchAll()
   }
 
@@ -439,6 +496,7 @@ export default function InventoryPage() {
     setMatEditCategory(m.category_id ?? '')
     setMatEditHasWater(!!m.has_water_source)
     setMatEditWaterQty(String(m.water_source_quantity ?? 0))
+    setMatEditImageUrl(m.image_url ?? null)
     setMatEditOpen(true)
   }
 
@@ -454,8 +512,45 @@ export default function InventoryPage() {
       category_id: matEditCategory || null,
       has_water_source: matEditHasWater,
       water_source_quantity: matEditHasWater ? (parseInt(matEditWaterQty) || 0) : 0,
+      image_url: matEditImageUrl,
     }).eq('id', matEditId)
     setMatEditOpen(false); setSaving(false); fetchAll()
+  }
+
+  // ─── 包材代表圖片上傳 ─────────────────────────
+  // mode='add' → setMatImageUrl；mode='edit' → setMatEditImageUrl
+  const handleImagePick = async (file: File, mode: 'add' | 'edit') => {
+    if (!isAdmin) return
+    if (!file.type.startsWith('image/')) {
+      alert('請選擇圖片檔案')
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      alert('圖片大小限制 2MB 內')
+      return
+    }
+    setUploadingImage(true)
+    const ext = (file.name.split('.').pop() ?? 'jpg').toLowerCase()
+    // 事件處理時間生成唯一檔名（非 render 期間），lint 的純度規則此處不適用
+    // eslint-disable-next-line react-hooks/purity
+    const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+    const { error: upErr } = await supabase.storage
+      .from('material-images')
+      .upload(path, file, { upsert: false, contentType: file.type })
+    if (upErr) {
+      setUploadingImage(false)
+      alert(`圖片上傳失敗：${upErr.message}`)
+      return
+    }
+    const { data } = supabase.storage.from('material-images').getPublicUrl(path)
+    if (mode === 'add') setMatImageUrl(data.publicUrl)
+    else setMatEditImageUrl(data.publicUrl)
+    setUploadingImage(false)
+  }
+
+  const clearImage = (mode: 'add' | 'edit') => {
+    if (mode === 'add') setMatImageUrl(null)
+    else setMatEditImageUrl(null)
   }
 
   const handleDeleteMaterial = async (id: string, name: string) => {
@@ -735,6 +830,11 @@ export default function InventoryPage() {
   const activeMaterials = materials.filter(m => m.is_active).sort(bySortOrder)
   const inactiveMaterials = materials.filter(m => !m.is_active)
   const lowMatCount = activeMaterials.filter(m => m.stock < m.safety_stock).length
+  const waterTransferCount = activeMaterials.filter(m =>
+    m.has_water_source &&
+    (m.water_source_quantity ?? 0) > 0 &&
+    m.base_stock < m.safety_stock / 2
+  ).length
 
   // ─── Render ───────────────────────────────────
 
@@ -870,8 +970,58 @@ export default function InventoryPage() {
     )
   }
 
+  const renderImageUploadField = (mode: 'add' | 'edit') => {
+    const url = mode === 'add' ? matImageUrl : matEditImageUrl
+    return (
+      <div>
+        <Label>代表圖片</Label>
+        <div className="mt-1 flex items-center gap-3">
+          {url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={url} alt="包材圖片預覽" className="h-16 w-16 rounded border border-gray-200 object-cover" />
+          ) : (
+            <div className="flex h-16 w-16 items-center justify-center rounded border border-dashed border-gray-300 text-gray-300">
+              <Package className="h-6 w-6" />
+            </div>
+          )}
+          <div className="flex flex-col gap-1">
+            <label className={`cursor-pointer rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 ${uploadingImage ? 'pointer-events-none opacity-50' : ''}`}>
+              {uploadingImage ? '上傳中…' : url ? '更換圖片' : '上傳圖片'}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={uploadingImage}
+                onChange={async (e) => {
+                  const f = e.target.files?.[0]
+                  if (f) await handleImagePick(f, mode)
+                  e.target.value = ''
+                }}
+              />
+            </label>
+            {url && !uploadingImage && (
+              <button
+                type="button"
+                onClick={() => clearImage(mode)}
+                className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
+              >
+                移除
+              </button>
+            )}
+          </div>
+        </div>
+        <p className="mt-1 text-[10px] text-gray-400">最大 2MB；建議正方形</p>
+      </div>
+    )
+  }
+
   const renderMaterialCard = (m: MaterialStock, scope: DragScope, listIds: string[]) => {
     const isLow = m.stock < m.safety_stock
+    // 水源轉移警示：現有 < 安全/2 且水源有貨 → 提示應從水源轉移（與 isLow 獨立）
+    const needsWaterTransfer =
+      m.has_water_source &&
+      (m.water_source_quantity ?? 0) > 0 &&
+      m.base_stock < m.safety_stock / 2
     const pct = m.safety_stock > 0 ? Math.min(100, (m.stock / m.safety_stock) * 100) : 100
     const isDraggingThis = dragging?.id === m.id
     const canDrop = !!dragging && sameScope(dragging.scope, scope) && dragging.id !== m.id
@@ -897,7 +1047,7 @@ export default function InventoryPage() {
             handleCardDrop(scope, listIds, m.id)
           }
         }}
-        className={`${isDraggingThis ? 'opacity-40' : ''} ${canDrop ? 'ring-2 ring-blue-400 ring-offset-1' : ''} transition-all`}
+        className={`${isDraggingThis ? 'opacity-40' : ''} ${canDrop ? 'ring-2 ring-blue-400 ring-offset-1' : ''} ${needsWaterTransfer ? 'border-pink-300 bg-pink-100' : ''} transition-all`}
       >
         <CardContent className="pt-4">
           <div className="flex items-center justify-between">
@@ -925,11 +1075,12 @@ export default function InventoryPage() {
               )}
             </div>
           </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <div className={`text-3xl font-bold ${isLow ? 'text-red-600' : ''}`}>
+          <div className="mt-2 flex items-center gap-3">
+            <div className={`text-3xl font-bold leading-none ${isLow ? 'text-red-600' : ''}`}>
               {m.stock.toLocaleString()}
               <span className="ml-1 text-sm font-normal text-gray-500">{m.unit}</span>
             </div>
+            <MaterialImageThumb url={m.image_url} name={m.name} />
             {isAdmin && (
               <button
                 onClick={() => openAdjustDialog({ kind: 'material', id: m.id, name: m.name, unit: m.unit })}
@@ -954,6 +1105,12 @@ export default function InventoryPage() {
                   庫存轉移 →
                 </button>
               )}
+            </div>
+          )}
+          {needsWaterTransfer && (
+            <div className="mt-1 flex items-center gap-1 text-xs font-medium text-pink-700">
+              <AlertTriangle className="h-3 w-3" />
+              現有低於安全/2，建議從水源轉移
             </div>
           )}
           <div className="mt-1 text-xs text-gray-500">安全庫存: {m.safety_stock.toLocaleString()}</div>
@@ -987,6 +1144,11 @@ export default function InventoryPage() {
           {lowMatCount > 0 && (
             <Badge variant="destructive" className="text-xs">
               <AlertTriangle className="mr-1 h-3 w-3" /> {lowMatCount} 項包材低庫存
+            </Badge>
+          )}
+          {waterTransferCount > 0 && (
+            <Badge className="bg-pink-200 text-pink-800 hover:bg-pink-200 text-xs">
+              <AlertTriangle className="mr-1 h-3 w-3" /> {waterTransferCount} 項建議水源轉移
             </Badge>
           )}
           <span className="text-xs text-gray-500">每項依各自到貨時間 D+N 計算未來庫存</span>
@@ -1311,7 +1473,8 @@ export default function InventoryPage() {
                 </div>
               )}
             </div>
-            <Button className="w-full" onClick={handleAddMaterial} disabled={saving || !matName.trim()}>
+            {renderImageUploadField('add')}
+            <Button className="w-full" onClick={handleAddMaterial} disabled={saving || uploadingImage || !matName.trim()}>
               {saving ? '儲存中...' : '新增包材'}
             </Button>
           </div>
@@ -1395,7 +1558,8 @@ export default function InventoryPage() {
                 </div>
               )}
             </div>
-            <Button className="w-full" onClick={handleEditMaterial} disabled={saving || !matEditName.trim()}>
+            {renderImageUploadField('edit')}
+            <Button className="w-full" onClick={handleEditMaterial} disabled={saving || uploadingImage || !matEditName.trim()}>
               {saving ? '儲存中...' : '儲存變更'}
             </Button>
           </div>

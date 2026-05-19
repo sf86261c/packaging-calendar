@@ -249,6 +249,7 @@ product_material_usage       — 產品→包材用量對照 (product_id, packag
 | `030_packaging_materials_sort_order.sql` | packaging_materials 加 sort_order 欄位，初始按 name 排序（10/20/30...）|
 | `031_app_users_permissions.sql` | app_users 加 permissions JSONB + is_active；管理 RPC（admin_list/create/update/reset_password/delete），sign_in 加 is_active 檢查並回傳 permissions |
 | `032_packaging_materials_water_source.sql` | packaging_materials 加 has_water_source + water_source_quantity（水源庫存功能） |
+| `033_material_image.sql` | packaging_materials 加 image_url + 建立 `material-images` Storage bucket（public read，anon RW policies） |
 
 ## 檔案結構
 
@@ -432,6 +433,63 @@ ALTER TABLE stock_adjustments
 ```
 
 ## 變更紀錄
+
+### 2026-05-19 — 包材代表圖片 + 水源低水位粉紅警示
+
+**需求**
+1. 每張包材庫存卡可上傳代表圖片，位置在「XX 個」和「修正」按鈕之間（不可碰到兩者）；滑鼠停留 0.5 秒後放大圖片。
+2. 包材若「現有 < 安全庫存 / 2 且水源有庫存」→ 卡片變粉紅 + 列入叫貨通知（提示須從水源轉移）。
+
+**設計**
+
+1. **代表圖片**
+   - 儲存：Supabase Storage `material-images` bucket（public read），檔名 `{timestamp}-{random}.{ext}`
+   - DB：`packaging_materials.image_url TEXT NULL` 存 public URL
+   - 新增/編輯包材 Dialog 加圖片上傳欄位（拖檔 + 預覽 + 移除），限制 2MB、image/*
+   - 卡片內 `<MaterialImageThumb>` 元件：
+     - 縮圖 40×40px，position 在數值大字（`flex items-center gap-3`）和「修正」按鈕（`ml-auto`）之間，靠 gap 與 ml-auto 自然分離
+     - hover `setTimeout(0.5s)` 後 popover 浮層顯示 240×240px 大圖（`position: absolute`，z-50，不佔 layout）
+     - mouseLeave 立即 clearTimeout + 收回
+     - 沒有圖片時顯示 `<Package>` 淡灰佔位（dashed border）
+   - 「XX 個」由 `items-baseline` 改 `items-center` 以對齊縮圖；不影響數字 + unit 內部排版
+
+2. **水源轉移粉紅警示**
+   - 判斷：`has_water_source && water_source_quantity > 0 && base_stock < safety_stock / 2`
+   - 條件下卡片套用 `bg-pink-100 border-pink-300`
+   - 卡片內加 `⚠️ 現有低於安全/2，建議從水源轉移`（`text-pink-700`）
+   - 頁面標題列新增 `{N} 項建議水源轉移` badge（粉紅色）
+   - LINE 叫貨通知新增第三段「【建議從水源轉移】現有低於安全/2」
+     - 與既有「包材低庫存」段獨立：因為總庫存（base + water）可能仍 ≥ safety，原本「全庫存充足」訊息會漏掉
+     - 訊息格式：`• 名稱：現有 X / 水源 Y / 安全 Z`
+   - 觸發時機：併入既有每日 09:00 自動 cron + 手動「叫貨通知」按鈕，不額外推播
+
+**取捨**
+- 圖片用 Supabase Storage 而非第三方圖床：原生整合、有 CDN、不需額外服務
+- 圖片 URL 直存 DB 而非 storage path：渲染最方便，無須額外簽 URL；缺點是 bucket 改名 / 搬遷時需手動 update
+- 縮圖點擊不上傳：上傳統一在編輯 Dialog 內，避免卡片誤觸；非 admin 看到佔位 icon 即可
+- 圖片刪除不連動 Storage（孤兒檔案累積）：不阻擋包材刪除流程，後續可寫清理 cron
+- 水源警示與「低庫存」獨立計算：避免「總庫存足，但其實主倉空了」這種隱患
+- 不額外推播 LINE：併入既有 cron，避免轟炸 + 與既有訊息同批送
+
+**變更檔案**
+
+| 變更 | 檔案 |
+|---|---|
+| Migration 033（待 Dashboard 執行） | `supabase/migrations/033_material_image.sql`（新增） |
+| `PackagingMaterial.image_url` | `src/lib/types.ts` |
+| `MaterialStock.image_url` + 上傳 state/handler + `renderImageUploadField` + dialog 區塊 + `MaterialImageThumb` 元件 + renderMaterialCard 粉紅警示 + `waterTransferCount` badge | `src/app/inventory/page.tsx` |
+| 叫貨 API 加 `waterTransferMaterials` 計算 + 第三段訊息 | `src/app/api/line-notify/route.ts` |
+
+**Migration（待 Dashboard 執行）**
+- `033_material_image.sql` — 未執行前 `image_url` 欄位不存在；Storage bucket `material-images` 不存在 → 上傳失敗 + Storage policies 不存在
+
+**[blind spot review]**
+- A. 邊界情況已處理：圖片 > 2MB 阻擋上傳；非圖片檔阻擋；無圖片時佔位 icon；無水源時不觸發粉紅警示
+- B. 邊界情況「未」處理及原因：包材被刪除時 Storage 圖片變孤兒（無大影響，後續可寫 cron 清理）；圖片上傳成功但 DB UPDATE 失敗時圖片殘留（罕見，可手動清）
+- C. 此改動可能間接影響但「我沒驗證」的地方：行動裝置上 popover 浮層位置與寬度（已用 `-translate-x-1/2 top-12` 置中，理論上 OK）；既有 `lowMatCount` badge 並列顯示新 badge 在窄螢幕可能折行（用 `flex-wrap` 已涵蓋）；圖片載入失敗時 `<img>` 顯示破圖（未處理 onError fallback）
+- D. 成功條件驗證：tsc --noEmit 通過、next build 成功、eslint 只剩既存 unrelated warnings
+
+---
 
 ### 2026-05-06 — 搜尋功能擴展：支援品項名稱搜尋
 
@@ -1646,6 +1704,7 @@ metadata key 全中文：`客戶 / 日期 / 原日期 / 付款狀態 / 品項 / 
 - ✅ Migration 027 + 028 + 029 + 030 + 031 + 032 已執行（2026-05-06 — 試吃/耗損可選包材、包材自訂分類、停用 tube_pkg、包材排序、帳號權限系統、包材水源庫存）
 - ✅ 統計儀表板「包裝款式統計」改為盒數計算（2026-05-06 — pkgMap 按 cake/tube/single_cake 各 category quantity 累加，UI 文字改「使用數量 / 個」）
 - ✅ 搜尋功能擴展支援品項名稱（2026-05-06 — 月曆 inline 搜尋與 `/search` 完整頁同時搜「客戶 + 品項」，結果列加命中原因 badge）
+- ⏳ Migration 033 待執行（2026-05-19 — packaging_materials.image_url + Storage bucket `material-images` + policies）
 
 ## 環境資訊
 
