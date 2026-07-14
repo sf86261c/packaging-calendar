@@ -1706,7 +1706,7 @@ metadata key 全中文：`客戶 / 日期 / 原日期 / 付款狀態 / 品項 / 
 - ✅ 搜尋功能擴展支援品項名稱（2026-05-06 — 月曆 inline 搜尋與 `/search` 完整頁同時搜「客戶 + 品項」，結果列加命中原因 badge）
 - ⏳ Migration 033 待執行（2026-05-19 — packaging_materials.image_url + Storage bucket `material-images` + policies）
 - ✅ 雙入蛋糕禮盒獨立分類 double_cake 前端支援（2026-07-14 — types.ts 加分類；order-form-dialog + calendar/[date] 內嵌 dialog 各加「雙入蛋糕禮盒」區塊【名稱+數量，無包裝/烙印，無品項時整塊隱藏】；split-order-dialog 追加區 existingDoubleCakes 分支+noCategoryAvailable；日頁生產彙總「雙入」卡；月曆格🍰計數；dashboard totalCakes/dailyCakeMap；settings CATEGORY_LABELS/ICONS🎁；audit-recipes.mjs 雙入解析規則【雙入-A+B 各0.25／雙入-A×2＝0.5／+午茶餅乾佔位不扣庫】；經 4 輪 skeptic/red-team/simplifier 對抗式審查）
-- ⏳ Migration 034 待執行（2026-07-14 — 雙入蛋糕禮盒：category CHECK 加 double_cake【動態重建，正式庫約束曾被手改與檔案史不符】＋種 9 變體 SKU＋12 配方＋36 通用包材列＋兩筆蘇玉芳訂單(cc1bb246/d6e6bd4b)改掛「雙入-經典原味+伯爵紅茶」並以 RPC 重算【7/14 -66/-66、7/15 -112/-112，移除幽靈茉莉】＋舊品項改名「雙入蛋糕禮盒(舊-勿用)」＋守門式停用；「月中試吃-7月」(ebff6fd7) 依業主指示由操作者上線後改掛正確組合，再執行檔尾【完成步驟】單行停用舊品項；034 跑完須手動 GET /api/line-notify 發校正叫貨通知；⚠ 整檔一次貼、勿分段、成功後勿重貼）
+- ✅ Migration 034 已執行（2026-07-14 業主 Dashboard 執行，12 項 DB 斷言＋獨立驗收全過；**過渡期待辦**：操作者改掛「月中試吃-7月」後執行 034 檔尾【完成步驟】單行停用舊品項，屆時 audit-recipes 應 exit 0 — 雙入蛋糕禮盒：category CHECK 加 double_cake【動態重建，正式庫約束曾被手改與檔案史不符】＋種 9 變體 SKU＋12 配方＋36 通用包材列＋兩筆蘇玉芳訂單(cc1bb246/d6e6bd4b)改掛「雙入-經典原味+伯爵紅茶」並以 RPC 重算【7/14 -66/-66、7/15 -112/-112，移除幽靈茉莉】＋舊品項改名「雙入蛋糕禮盒(舊-勿用)」＋守門式停用；「月中試吃-7月」(ebff6fd7) 依業主指示由操作者上線後改掛正確組合，再執行檔尾【完成步驟】單行停用舊品項；034 跑完須手動 GET /api/line-notify 發校正叫貨通知；⚠ 整檔一次貼、勿分段、成功後勿重貼）
 - 📌 既知行為註記（2026-07-14 — inventory.quantity 為 integer：小數扣量寫入時四捨五入，例 446×0.25=111.5 → 存 112、334×0.25=83.5 → 存 84，非 bug；追加流程對停用品項的隱形/包材跳扣既有坑【order-form-dialog.tsx packaging 三元式+stock.ts !product continue】本次未修，見 034 檔頭過渡警語）
 
 ## 環境資訊
