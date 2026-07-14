@@ -6,6 +6,9 @@
 //     · 單口味(A): 2 條 A = 一筆 recipe(A 條 2) 或兩筆(各 1)
 //   - tube (筒): 1 筒 = 1 條 對應口味 cake_bar (一筆 recipe)
 //   - single_cake (單入): 1 個 = 0.25 條 對應口味 cake_bar (一筆 recipe)
+//   - double_cake (雙入禮盒): 「雙入-A+B」= A、B 各 0.25 條;
+//     「雙入-A×2」= A 0.5 條; 「雙入-A+午茶餅乾」= A 0.25 條
+//     (午茶餅乾為名稱佔位、不計庫存、不建 recipe 列)
 //   - cookie / cake_bar / tube_pkg: 無 recipe
 //
 // 比對 cake_bar 名稱時注意「（條）」後綴。
@@ -56,7 +59,7 @@ console.log(`cake_bar 口味: ${[...cakeBarByFlavor.keys()].join(' / ')}`)
 console.log('───────────────────────────────────────')
 
 // 預期應有 recipe 的類別
-const RECIPE_CATEGORIES = new Set(['cake', 'tube', 'single_cake'])
+const RECIPE_CATEGORIES = new Set(['cake', 'tube', 'single_cake', 'double_cake'])
 // 預期應無 recipe 的類別
 const NO_RECIPE_CATEGORIES = new Set(['cake_bar', 'cookie', 'tube_pkg'])
 
@@ -107,6 +110,18 @@ for (const p of products) {
     } else {
       const f = name.replace(/^單入-/, '').trim()
       expectedFlavorQty.set(f, 0.25)
+    }
+  } else if (p.category === 'double_cake') {
+    // 雙入-A+B(各0.25) / 雙入-A×2(0.5) / 雙入-A+午茶餅乾(A 0.25,餅乾佔位不入 recipe)
+    const rest = name.replace(/^雙入-/, '').trim()
+    if (rest.includes('×2')) {
+      expectedFlavorQty.set(rest.replace('×2', '').trim(), 0.5)
+    } else {
+      for (const f of rest.split('+')) {
+        const t = f.trim()
+        if (t === '午茶餅乾') continue
+        expectedFlavorQty.set(t, 0.25)
+      }
     }
   }
 
@@ -210,6 +225,7 @@ console.log('\n═══ 所有 recipe(供人工複核) ═══')
 const cakeProducts = (byCategory.get('cake') || [])
   .concat(byCategory.get('tube') || [])
   .concat(byCategory.get('single_cake') || [])
+  .concat(byCategory.get('double_cake') || [])
   .filter((p) => p.is_active)
   .sort((a, b) => a.category.localeCompare(b.category) || a.sort_order - b.sort_order)
 for (const p of cakeProducts) {

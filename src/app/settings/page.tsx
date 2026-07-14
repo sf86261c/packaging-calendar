@@ -87,6 +87,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   tube: '旋轉筒',
   tube_pkg: '旋轉筒包裝',
   single_cake: '單入蛋糕',
+  double_cake: '雙入蛋糕禮盒',
   cookie: '曲奇',
 }
 
@@ -96,6 +97,7 @@ const CATEGORY_ICONS: Record<string, string> = {
   tube: '🫙',
   tube_pkg: '📦',
   single_cake: '🧁',
+  double_cake: '🎁',
   cookie: '🍪',
 }
 

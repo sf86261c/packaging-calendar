@@ -136,6 +136,10 @@ export default function DashboardPage() {
               orderSingleCakeQty += item.quantity
               dailyCakeMap[orderDate] = (dailyCakeMap[orderDate] || 0) + item.quantity
             }
+            if (cat === 'double_cake') {
+              totalCakes += item.quantity
+              dailyCakeMap[orderDate] = (dailyCakeMap[orderDate] || 0) + item.quantity
+            }
             if (cat === 'tube') {
               totalTubes += item.quantity
               orderTubeQty += item.quantity

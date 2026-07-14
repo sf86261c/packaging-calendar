@@ -331,7 +331,7 @@ export default function CalendarPage() {
         const items = (order as any).order_items || []
         for (const item of items) {
           const cat = item.product?.category
-          if (cat === 'cake' || cat === 'single_cake') map[date].cakes += item.quantity
+          if (cat === 'cake' || cat === 'single_cake' || cat === 'double_cake') map[date].cakes += item.quantity
           else if (cat === 'cookie') map[date].cookies += item.quantity
           else if (cat === 'tube') map[date].tubes += item.quantity
         }

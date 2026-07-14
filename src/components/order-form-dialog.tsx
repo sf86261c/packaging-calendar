@@ -169,6 +169,7 @@ export function OrderFormDialog({
   const cakeProducts = products.filter(p => p.category === 'cake')
   const tubeProducts = products.filter(p => p.category === 'tube')
   const singleCakeProducts = products.filter(p => p.category === 'single_cake')
+  const doubleCakeProducts = products.filter(p => p.category === 'double_cake')
   const cookieProducts = products.filter(p => p.category === 'cookie')
   const commonCookieProducts = cookieProducts.filter(p => p.is_common)
   const specialCookieProducts = cookieProducts.filter(p => !p.is_common)
@@ -503,6 +504,18 @@ export function OrderFormDialog({
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {doubleCakeProducts.length > 0 && (
+            <div className="rounded-lg border p-3 space-y-2">
+              <Label className="text-sm font-semibold">雙入蛋糕禮盒</Label>
+              {doubleCakeProducts.map(p => (
+                <div key={p.id} className="flex items-center gap-2">
+                  <span className="text-sm w-40 truncate">{p.name}</span>
+                  <Input type="number" min={0} className="w-20" value={formItems[p.id] || ''} onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))} placeholder="0" />
+                </div>
+              ))}
             </div>
           )}
 

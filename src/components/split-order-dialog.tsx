@@ -161,11 +161,18 @@ export function SplitOrderDialog({
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
     [products, appendableSet],
   )
+  const existingDoubleCakes = useMemo(
+    () => products
+      .filter((p) => p.category === 'double_cake' && p.is_active && appendableSet.has(p.id))
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [products, appendableSet],
+  )
 
   // 「原訂單群已有某類別」= 該類別至少有一個 product 在 appendableSet 中
   const hasExistingCake = existingCakes.length > 0
   const hasExistingTube = existingTubes.length > 0
   const hasExistingSingleCake = existingSingleCakes.length > 0
+  const hasExistingDoubleCake = existingDoubleCakes.length > 0
 
   const cakePkgName = (id: string) => cakePackagingStyles.find((p) => p.id === id)?.name ?? ''
   const cakeBrandName = (id: string) => cakeBrandingStyles.find((b) => b.id === id)?.name ?? ''
@@ -289,6 +296,10 @@ export function SplitOrderDialog({
         }
         if (product.category === 'single_cake' && !isExistingItem) {
           alert(`「${product.name}」無法追加：單入蛋糕僅可追加原訂單已有口味`)
+          return
+        }
+        if (product.category === 'double_cake' && !isExistingItem) {
+          alert(`「${product.name}」無法追加：雙入蛋糕禮盒僅可追加原訂單已有口味`)
           return
         }
       }
@@ -433,7 +444,7 @@ export function SplitOrderDialog({
                   : (tubeSelectedId ? allTubes.filter((p) => p.id === tubeSelectedId) : allTubes)
                 const noCategoryAvailable =
                   allCakes.length === 0 && allTubes.length === 0
-                  && !hasExistingSingleCake && allCookies.length === 0
+                  && !hasExistingSingleCake && !hasExistingDoubleCake && allCookies.length === 0
 
                 return (
                   <div key={row.rowId} className="rounded-lg border p-3 space-y-3">
@@ -573,6 +584,32 @@ export function SplitOrderDialog({
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                           {existingSingleCakes.map((p) => (
+                            <div key={p.id} className="flex items-center gap-2">
+                              <span className="text-xs text-gray-600 flex-1 break-words">{p.name}</span>
+                              <Input
+                                type="number"
+                                min={0}
+                                value={row.items[p.id] || ''}
+                                placeholder="0"
+                                onChange={(e) =>
+                                  updateAppendItem(row.rowId, p.id, parseInt(e.target.value) || 0)
+                                }
+                                className="h-7 w-16 text-sm"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 雙入蛋糕禮盒：保守處理 — 僅原訂單已有組合才開放 */}
+                    {hasExistingDoubleCake && (
+                      <div className="rounded-md bg-amber-50/40 p-2 space-y-1.5">
+                        <div className="text-xs font-semibold text-gray-700">
+                          雙入蛋糕禮盒（限原訂單已有組合）
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {existingDoubleCakes.map((p) => (
                             <div key={p.id} className="flex items-center gap-2">
                               <span className="text-xs text-gray-600 flex-1 break-words">{p.name}</span>
                               <Input

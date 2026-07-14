@@ -882,6 +882,7 @@ export default function DayOrderPage() {
   const cakeProducts = products.filter(p => p.category === 'cake')
   const tubeProducts = products.filter(p => p.category === 'tube')
   const singleCakeProducts = products.filter(p => p.category === 'single_cake')
+  const doubleCakeProducts = products.filter(p => p.category === 'double_cake')
   const cookieProducts = products.filter(p => p.category === 'cookie')
   const commonCookieProducts = cookieProducts.filter(p => p.is_common)
   const specialCookieProducts = cookieProducts.filter(p => !p.is_common)
@@ -905,6 +906,7 @@ export default function DayOrderPage() {
   const cakeBoxes = orders.reduce((s, o) => s + o.items.filter(i => i.category === 'cake').reduce((a, i) => a + i.quantity, 0), 0)
   const tubeCount = orders.reduce((s, o) => s + o.items.filter(i => i.category === 'tube').reduce((a, i) => a + i.quantity, 0), 0)
   const singleCount = orders.reduce((s, o) => s + o.items.filter(i => i.category === 'single_cake').reduce((a, i) => a + i.quantity, 0), 0)
+  const doubleCakeCount = orders.reduce((s, o) => s + o.items.filter(i => i.category === 'double_cake').reduce((a, i) => a + i.quantity, 0), 0)
   const cookieCount = orders.reduce((s, o) => s + o.items.filter(i => i.category === 'cookie').reduce((a, i) => a + i.quantity, 0), 0)
   const printedCount = orders.filter(o => o.printed).length
   const paidCount = orders.filter(o => o.paid).length
@@ -1151,6 +1153,7 @@ export default function DayOrderPage() {
               <div className="flex justify-between text-sm"><span className="text-gray-500">蛋糕盒</span><span className="font-medium">{cakeBoxes}</span></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">旋轉筒</span><span className="font-medium">{tubeCount}</span></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">單入蛋糕</span><span className="font-medium">{singleCount}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-500">雙入</span><span className="font-medium">{doubleCakeCount}</span></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">曲奇</span><span className="font-medium">{cookieCount}</span></div>
             </CardContent>
           </Card>
@@ -1419,6 +1422,19 @@ export default function DayOrderPage() {
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* === 雙入蛋糕禮盒 === */}
+            {doubleCakeProducts.length > 0 && (
+              <div className="rounded-lg border p-3 space-y-2">
+                <Label className="text-sm font-semibold">雙入蛋糕禮盒</Label>
+                {doubleCakeProducts.map(p => (
+                  <div key={p.id} className="flex items-center gap-2">
+                    <span className="text-sm w-40 truncate">{p.name}</span>
+                    <Input type="number" min={0} className="w-20" value={formItems[p.id] || ''} onChange={e => setFormItems(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))} placeholder="0" />
+                  </div>
+                ))}
               </div>
             )}
 
