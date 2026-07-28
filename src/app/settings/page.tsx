@@ -567,7 +567,7 @@ export default function SettingsPage() {
     sales_only: {
       is_admin: false,
       permissions: { calendar: 'adjustment_only', dashboard: 'none', inventory: 'none', activity: 'none', settings: 'none' },
-      label: '門市/試吃only（僅試吃/耗損/散單）',
+      label: '門市/試吃（可看月曆，訂單唯讀）',
     },
   }
 
@@ -1495,7 +1495,7 @@ export default function SettingsPage() {
                         <option value="view">可查看（不可編輯）</option>
                         <option value="edit">可編輯</option>
                         {p === 'calendar' && (
-                          <option value="adjustment_only">僅試吃/耗損/散單按鈕</option>
+                          <option value="adjustment_only">可查看＋可記錄試吃/耗損/散單</option>
                         )}
                       </select>
                     </div>

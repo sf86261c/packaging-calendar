@@ -34,6 +34,7 @@ import { StockAdjustmentDialog } from '@/components/stock-adjustment-dialog'
 import type { AdjustmentInput } from '@/components/stock-adjustment-dialog'
 import { SplitOrderDialog, type SplitInput, type AppendInput } from '@/components/split-order-dialog'
 import { logActivity } from '@/lib/activity'
+import { useCurrentUserClient, canUseCalendarOrders, canUseStockAdjustment } from '@/lib/auth'
 
 interface BatchSibling {
   orderId: string
@@ -67,6 +68,9 @@ export default function DayOrderPage() {
   const params = useParams()
   const router = useRouter()
   const supabase = createClient()
+  const { user } = useCurrentUserClient()
+  const canEditOrders = canUseCalendarOrders(user)
+  const canAdjust = canUseStockAdjustment(user)
   const dateStr = params.date as string
   const date = parseISO(dateStr)
 
@@ -326,11 +330,13 @@ export default function DayOrderPage() {
   }
 
   const openNewDialog = () => {
+    if (!canEditOrders) return
     resetForm()
     setDialogOpen(true)
   }
 
   const openEditDialog = (order: OrderRow) => {
+    if (!canEditOrders) return
     setShowAllCookies(false)
     setEditingOrderId(order.id)
     setFormDate(dateStr)
@@ -401,6 +407,7 @@ export default function DayOrderPage() {
   // ─── Save (add or edit) ─────────────────────────────
 
   const handleSaveOrder = async () => {
+    if (!canEditOrders) return
     if (!formName.trim() || !formDate) return
     if (!editingOrderId && duplicateName && !confirmedDifferent) return
     setSaving(true)
@@ -480,6 +487,7 @@ export default function DayOrderPage() {
   }
 
   const handleDelete = async (orderId: string) => {
+    if (!canEditOrders) return
     if (!confirm('確定要刪除這筆訂單嗎？')) return
     const target = orders.find((o) => o.id === orderId)
     try {
@@ -495,6 +503,7 @@ export default function DayOrderPage() {
   }
 
   const handlePrintedToggle = async (orderId: string, printed: boolean) => {
+    if (!canEditOrders) return
     await supabase.from('orders').update({ printed }).eq('id', orderId)
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, printed } : o))
     const target = orders.find((o) => o.id === orderId)
@@ -505,6 +514,7 @@ export default function DayOrderPage() {
   }
 
   const handlePaidToggle = async (orderId: string, paid: boolean) => {
+    if (!canEditOrders) return
     await supabase.from('orders').update({ paid }).eq('id', orderId)
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, paid } : o))
     const target = orders.find((o) => o.id === orderId)
@@ -519,6 +529,7 @@ export default function DayOrderPage() {
   const handleSplitConfirm = async (
     { splits, appends }: { splits: SplitInput[]; appends: AppendInput[] },
   ) => {
+    if (!canEditOrders) return
     if (!editingOrderId) {
       alert('請先儲存訂單後再分批/追加')
       return
@@ -733,6 +744,7 @@ export default function DayOrderPage() {
   // ─── Adjustment handlers ────────────────────────────
 
   const handleSaveAdjustment = async (value: AdjustmentInput) => {
+    if (!canAdjust) return
     try {
       let adjustmentId: string
       if (editingAdjustment) {
@@ -844,6 +856,7 @@ export default function DayOrderPage() {
   }
 
   const handleDeleteAdjustment = async (id: string) => {
+    if (!canAdjust) return
     if (!confirm('確定刪除此筆試吃/耗損？相關庫存扣減會一併回沖。')) return
     try {
       await deleteAdjustmentWithInventory(supabase, id)
@@ -855,6 +868,7 @@ export default function DayOrderPage() {
   }
 
   const handleEditAdjustment = (a: StockAdjustment & { items: StockAdjustmentItem[] }) => {
+    if (!canAdjust) return
     setEditingAdjustment({
       id: a.id,
       value: {
@@ -1002,9 +1016,11 @@ export default function DayOrderPage() {
                   <Download className="mr-1 h-4 w-4" /> 匯出
                 </Button>
               )}
-              <Button size="sm" onClick={openNewDialog}>
-                <Plus className="mr-1 h-4 w-4" /> 新增訂單
-              </Button>
+              {canEditOrders && (
+                <Button size="sm" onClick={openNewDialog}>
+                  <Plus className="mr-1 h-4 w-4" /> 新增訂單
+                </Button>
+              )}
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -1028,23 +1044,27 @@ export default function DayOrderPage() {
                       <Fragment key={order.id}>
                         <TableRow className={order.printed ? 'bg-yellow-100' : ''}>
                           <TableCell>
-                            <Checkbox
-                              checked={order.printed}
-                              onCheckedChange={(checked) => handlePrintedToggle(order.id, !!checked)}
-                            />
+                            {canEditOrders && (
+                              <Checkbox
+                                checked={order.printed}
+                                onCheckedChange={(checked) => handlePrintedToggle(order.id, !!checked)}
+                              />
+                            )}
                           </TableCell>
                           <TableCell>
-                            <button
-                              type="button"
-                              onClick={() => handlePaidToggle(order.id, !order.paid)}
-                              className={`rounded-full px-2 py-0.5 text-xs font-medium transition-colors ${
-                                order.paid
-                                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                              }`}
-                            >
-                              {order.paid ? '已付款' : '未付款'}
-                            </button>
+                            {canEditOrders && (
+                              <button
+                                type="button"
+                                onClick={() => handlePaidToggle(order.id, !order.paid)}
+                                className={`rounded-full px-2 py-0.5 text-xs font-medium transition-colors ${
+                                  order.paid
+                                    ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                                }`}
+                              >
+                                {order.paid ? '已付款' : '未付款'}
+                              </button>
+                            )}
                           </TableCell>
                           <TableCell className="hidden sm:table-cell">
                             <span className="text-xs">{order.status}</span>
@@ -1081,12 +1101,16 @@ export default function DayOrderPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-1">
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-400 hover:text-blue-600" onClick={() => openEditDialog(order)}>
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-600" onClick={() => handleDelete(order.id)}>
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
+                              {canEditOrders && (
+                                <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-400 hover:text-blue-600" onClick={() => openEditDialog(order)}>
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
+                              {canEditOrders && (
+                                <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-600" onClick={() => handleDelete(order.id)}>
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -1229,12 +1253,16 @@ export default function DayOrderPage() {
                   {a.note && <span className="text-xs text-gray-400">— {a.note}</span>}
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon-xs" onClick={() => handleEditAdjustment(a)}>
-                    ✏️
-                  </Button>
-                  <Button variant="ghost" size="icon-xs" onClick={() => handleDeleteAdjustment(a.id)}>
-                    🗑️
-                  </Button>
+                  {canAdjust && (
+                    <Button variant="ghost" size="icon-xs" onClick={() => handleEditAdjustment(a)}>
+                      ✏️
+                    </Button>
+                  )}
+                  {canAdjust && (
+                    <Button variant="ghost" size="icon-xs" onClick={() => handleDeleteAdjustment(a.id)}>
+                      🗑️
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}

@@ -39,6 +39,7 @@ function pathToPage(pathname: string): PageRoute | null {
   if (pathname.startsWith('/inventory')) return 'inventory'
   if (pathname.startsWith('/activity')) return 'activity'
   if (pathname.startsWith('/settings')) return 'settings'
+  if (pathname.startsWith('/search')) return 'calendar'
   return null
 }
 

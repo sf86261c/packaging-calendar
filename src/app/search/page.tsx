@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { OrderFormDialog, type EditingOrder } from '@/components/order-form-dialog'
+import { useCurrentUserClient, canUseCalendarOrders } from '@/lib/auth'
 
 interface SearchResult {
   id: string
@@ -32,6 +33,8 @@ interface SearchResult {
 export default function SearchPage() {
   const router = useRouter()
   const supabase = createClient()
+  const { user } = useCurrentUserClient()
+  const canEditOrders = canUseCalendarOrders(user)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
@@ -246,15 +249,17 @@ export default function SearchPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant="outline">{r.status}</Badge>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-blue-500 hover:text-blue-700"
-                    onClick={(e) => { e.stopPropagation(); openEdit(r) }}
-                    aria-label="編輯"
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
+                  {canEditOrders && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-blue-500 hover:text-blue-700"
+                      onClick={(e) => { e.stopPropagation(); openEdit(r) }}
+                      aria-label="編輯"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>

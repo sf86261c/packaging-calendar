@@ -79,11 +79,20 @@ const cases = [
   ['viewer canEditPage(inventory)', canEditPage(viewer, 'inventory'), false],
   ['viewer canUseCalendarOrders（calendar=view）', canUseCalendarOrders(viewer), false],
 
-  // 門市/試吃only：進不了庫存頁，但月曆可用試吃/耗損/散單
+  // adjustment_only（2026-07-28 新語意）：月曆看得到、訂單唯讀、試吃/耗損/散單可用
   ['sales_only canEditStock', canEditStock(salesOnly), false],
   ['sales_only canAccessPage(inventory)', canAccessPage(salesOnly, 'inventory'), false],
   ['sales_only canUseStockAdjustment', canUseStockAdjustment(salesOnly), true],
   ['sales_only canUseCalendarOrders（adjustment_only 不含訂單 CRUD）', canUseCalendarOrders(salesOnly), false],
+  ['sales_only canAccessPage(calendar)', canAccessPage(salesOnly, 'calendar'), true],
+  // ↓ 新語意的核心斷言：adjustment_only 現在算「可查看」（原本只回 view/edit → 目前為 false）
+  ['sales_only canViewPage(calendar)（新語意：看得到完整月曆）', canViewPage(salesOnly, 'calendar'), true],
+  ['sales_only canEditPage(calendar)（仍不可編輯）', canEditPage(salesOnly, 'calendar'), false],
+
+  // 反向確認：view 模式不得誤放行試吃/耗損/散單
+  ['viewer canUseStockAdjustment（calendar=view 不得放行）', canUseStockAdjustment(viewer), false],
+  ['admin canUseStockAdjustment', canUseStockAdjustment(admin), true],
+  ['admin canUseCalendarOrders', canUseCalendarOrders(admin), true],
 
   // 紀錄頁 edit：看全部
   ['auditor canViewAllActivity（activity=edit）', canViewAllActivity(auditor), true],

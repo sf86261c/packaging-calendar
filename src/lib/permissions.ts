@@ -26,10 +26,10 @@ export function canEditPage(user: PermissionSubject | null, page: PageRoute): bo
 
 export function canViewPage(user: PermissionSubject | null, page: PageRoute): boolean {
   const m = getPageMode(user, page)
-  return m === 'view' || m === 'edit'
+  return m === 'view' || m === 'edit' || m === 'adjustment_only'
 }
 
-// 月曆頁的「試吃/耗損/散單」按鈕：edit 與 adjustment_only 兩種模式都可用
+// adjustment_only：月曆可看、訂單唯讀，試吃/耗損/散單可用
 export function canUseStockAdjustment(user: PermissionSubject | null): boolean {
   const m = getPageMode(user, 'calendar')
   return m === 'edit' || m === 'adjustment_only'

@@ -435,6 +435,37 @@ ALTER TABLE stock_adjustments
 
 ## 變更紀錄
 
+### 2026-07-28（二）— 月曆「可查看＋可記錄試吃」模式 + 堵住日頁與 /search 兩條繞過路徑
+
+**需求**
+
+業主要「月曆可查看不可編輯，但上方『今日試吃/耗損/散單』可新增編輯」。原本三種模式都做不到這個組合：`view` 沒有試吃鈕，`adjustment_only` 整頁被換成只有一顆大按鈕的受限畫面，`edit` 什麼都能改。
+
+**裁決**：日頁進得去但唯讀；**用新行為取代舊 `adjustment_only`**；S3 缺口一併修。
+
+**設計**
+
+1. **沿用 `adjustment_only` 字串值、只改行為** — 生產只有 LAD1 一個帳號用它，沿用同一個值＝零資料遷移、零相容層。代價是識別字的字面意思（"only"）不再精確，以 UI 標籤與註解補償。新語意＝**月曆可看、訂單唯讀、試吃/耗損/散單可用**。
+2. `permissions.ts` — `canViewPage` 納入 `adjustment_only`；`canUseStockAdjustment`／`canUseCalendarOrders` **邏輯一字未動**（前者本來就含 adjustment_only，後者本來就只認 edit）。
+3. `calendar/page.tsx` — 刪除 `:359-394` 的 early return 受限畫面。刪除後 `adjustment_only` 自然走完整月曆，既有的 `{canAdjust && ...}`（試吃鈕）與 `{canEditOrders && ...}`（新增訂單鈕）自動產生正確結果。刪除前已確認 `StockAdjustmentDialog`（:586）與 `materialWarning`（:497）在主畫面另有掛載，不是唯一掛載點。
+4. `calendar/[date]/page.tsx` — 原本 1528 行**零權限判斷**，補上 17 個 gate：訂單類 7 handler + 5 UI 用 `canEditOrders`（僅 edit），試吃類 3 handler + 2 UI 用 `canAdjust`（edit + adjustment_only）。匯出與列印不加 gate（看得到就複製得走，匯出不構成額外權限）。
+5. **`/search` 一併堵（S4）** — 這是讓需求成立的必要條件：`adjustment_only` 看得到完整月曆後也看得到搜尋框，搜尋 → `/search` → 該頁掛 `OrderFormDialog` 可編輯訂單，「不可編輯」就破功。`pathToPage` 加 `/search → 'calendar'`，編輯鈕加 `canUseCalendarOrders` gate。
+
+**驗證（含真人實測，非只有靜態檢查）**
+
+- `verify-permissions.mjs` 33/34 → **34/34**（紅端唯一失敗項就是新語意的 `canViewPage(calendar)`）
+- tsc 0、build 成功、全 repo lint **74 errors 與改動前基線一字不差**（零新增）
+- 本機 dev server 注入 session 實跑三種身分，量化對照：
+
+  | 身分 | 編輯鈕 | 刪除鈕 | checkbox | 總按鈕 |
+  |---|---|---|---|---|
+  | admin | 22 | 22 | 44 | 112 |
+  | adjustment_only | **0** | **0** | **0** | 45 |
+
+  訂單列 40 列照常渲染（唯讀但資料完整）；`/search` 23 筆結果可見、編輯鈕消失；`calendar:'none'` 打 `/search` 被重導到 `/dashboard`（S4 修復生效）。
+
+**📌 既知（非本次造成，未修）**：`/dashboard` 有 React duplicate key warning，在未改動的頁面上同樣重現，屬既有問題。
+
 ### 2026-07-28 — 帳號權限「可查看/可編輯」真正生效 + 關閉自助註冊
 
 **背景**
@@ -475,8 +506,8 @@ ALTER TABLE stock_adjustments
 | 代號 | 缺口 | 影響 |
 |---|---|---|
 | S2 | `admin_*` RPC 全部 `GRANT TO anon`，`_assert_caller_admin` 只驗 client 自報的 UUID；而管理員 UUID 由 `activity_logs`（anon 可讀）洩漏 | 不需任何帳號即可建管理員／改密碼／刪帳號 |
-| S3 | `calendar/[date]` 日頁 1528 行零權限判斷，17 處寫入全裸；日期格 onClick 無 gate | `LAD1` 的 `adjustment_only` 形同虛設，可完整訂單 CRUD |
-| S4 | `/search` 不在 `app-shell.tsx` `pathToPage()` 的 5 條映射內 → URL guard 直接放行；該頁掛 `OrderFormDialog` 可編輯 | 任何登入者可讀改全部訂單 |
+| ~~S3~~ | ~~`calendar/[date]` 日頁 1528 行零權限判斷~~ | **已於 2026-07-28（二）修復**，見上方變更紀錄 |
+| ~~S4~~ | ~~`/search` 不在 `pathToPage()` 映射內~~ | **已於 2026-07-28（二）修復** |
 | S5 | `admin / admin888` 仍是 active 管理員，`sign_in` 無次數限制 | — |
 | S6 | 只有 `sign_in` 查 `is_active`，`readUser()` 不回查 DB | 停用帳號的既有分頁最長續用 10 小時 |
 | S7 | localStorage 未簽章，改 `is_admin:true` 即解鎖 /settings | 低於 S2（S2 連帳號都不用） |

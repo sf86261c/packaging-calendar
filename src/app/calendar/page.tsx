@@ -17,7 +17,7 @@ import {
   replaceAdjustmentInventory,
 } from '@/lib/stock'
 import { logActivity } from '@/lib/activity'
-import { useCurrentUserClient, getPageMode, canUseCalendarOrders, canUseStockAdjustment } from '@/lib/auth'
+import { useCurrentUserClient, canUseCalendarOrders, canUseStockAdjustment } from '@/lib/auth'
 import type { Product, PackagingStyle, ProductRecipe, ProductMaterialUsage } from '@/lib/types'
 
 interface DaySummary {
@@ -44,8 +44,6 @@ export default function CalendarPage() {
   const router = useRouter()
   const supabase = createClient()
   const { user } = useCurrentUserClient()
-  const calendarMode = getPageMode(user, 'calendar')
-  const adjustmentOnly = calendarMode === 'adjustment_only'
   const canEditOrders = canUseCalendarOrders(user)
   const canAdjust = canUseStockAdjustment(user)
   const [currentMonth, setCurrentMonth] = useState(new Date())
@@ -355,43 +353,6 @@ export default function CalendarPage() {
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [])
-
-  if (adjustmentOnly) {
-    return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center px-4">
-        <div className="text-center">
-          <div className="mb-2 text-4xl">🍰</div>
-          <h1 className="mb-2 text-2xl font-bold text-foreground">今日記錄</h1>
-          <p className="mb-8 text-sm text-muted-foreground">點下方按鈕記錄試吃 / 耗損 / 散單 / 門市銷售</p>
-          <Button
-            size="lg"
-            onClick={() => setAdjustmentOpen(true)}
-            className="h-14 px-8 text-base"
-          >
-            🍰 今日試吃 / 耗損 / 散單 / 門市銷售
-          </Button>
-        </div>
-
-        {materialWarning && (
-          <div className="mt-6 max-w-xl rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            <div className="flex items-start justify-between gap-2">
-              <pre className="whitespace-pre-wrap font-sans">{materialWarning}</pre>
-              <button onClick={() => setMaterialWarning(null)} className="text-amber-600 hover:text-amber-800">✕</button>
-            </div>
-          </div>
-        )}
-
-        <StockAdjustmentDialog
-          open={adjustmentOpen}
-          onOpenChange={setAdjustmentOpen}
-          products={products}
-          packagingStyles={packagingStyles}
-          materials={boxMaterials}
-          onSave={handleSaveAdjustment}
-        />
-      </div>
-    )
-  }
 
   return (
     <div>
