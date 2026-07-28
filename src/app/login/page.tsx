@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { signIn, signUp, useCurrentUserClient } from '@/lib/auth'
+import { signIn, useCurrentUserClient } from '@/lib/auth'
 import { logActivity } from '@/lib/activity'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,7 +12,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 export default function LoginPage() {
   const router = useRouter()
   const { user, mounted } = useCurrentUserClient()
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -43,13 +42,8 @@ export default function LoginPage() {
     }
     setLoading(true)
     try {
-      if (mode === 'signup') {
-        const user = await signUp(username.trim(), password)
-        await logActivity('註冊帳號', `user:${user.id}`, { 帳號: user.username })
-      } else {
-        const user = await signIn(username.trim(), password)
-        await logActivity('登入', `user:${user.id}`, { 帳號: user.username })
-      }
+      const user = await signIn(username.trim(), password)
+      await logActivity('登入', `user:${user.id}`, { 帳號: user.username })
       router.push('/calendar')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -62,9 +56,7 @@ export default function LoginPage() {
     <div className="mx-auto mt-12 max-w-md">
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">
-            📦 包裝行事曆 — {mode === 'signin' ? '登入' : '註冊'}
-          </CardTitle>
+          <CardTitle className="text-xl">📦 包裝行事曆 — 登入</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -84,8 +76,8 @@ export default function LoginPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={mode === 'signup' ? '至少 4 個字元' : '輸入密碼'}
-                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                placeholder="輸入密碼"
+                autoComplete="current-password"
               />
             </div>
             {error && (
@@ -94,18 +86,11 @@ export default function LoginPage() {
               </p>
             )}
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? '處理中...' : mode === 'signin' ? '登入' : '註冊並登入'}
+              {loading ? '處理中...' : '登入'}
             </Button>
-            <button
-              type="button"
-              onClick={() => {
-                setMode((m) => (m === 'signin' ? 'signup' : 'signin'))
-                setError(null)
-              }}
-              className="block w-full text-center text-sm text-muted-foreground hover:text-foreground hover:underline"
-            >
-              {mode === 'signin' ? '還沒有帳號？立即註冊' : '已有帳號？返回登入'}
-            </button>
+            <p className="text-center text-sm text-muted-foreground">
+              需要帳號請洽管理員開通
+            </p>
           </form>
         </CardContent>
       </Card>

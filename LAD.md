@@ -40,7 +40,8 @@
 - 任何受保護頁面在未登入時自動跳 `/login`
 - Session 10 小時固定到期（非 idle timeout），到時自動登出 + 寫紀錄
 - 不存在路由 → 已登入跳 `/calendar`、未登入跳 `/login`（不顯示 Next.js 預設 404）
-- 預設管理員：`admin / admin888`（可在 Supabase Dashboard `app_users` 表追加其他人）
+- 預設管理員：`admin / admin888`（⚠ 2026-07-28 查核仍為 active 且未輪換，見變更紀錄 S5）
+- 帳號一律由管理員在 /settings 建立；自助註冊已於 2026-07-28 關閉（前端移除 + migration 035 撤權）
 
 ### 產品結構
 
@@ -433,6 +434,54 @@ ALTER TABLE stock_adjustments
 ```
 
 ## 變更紀錄
+
+### 2026-07-28 — 帳號權限「可查看/可編輯」真正生效 + 關閉自助註冊
+
+**背景**
+
+`app_users.permissions`（migration 031）自 2026-05-04 起就能逐帳號設定 5 個頁面的 `none/view/edit`，但**後端只兌現了一半**：庫存頁 40 處硬判 `is_admin`、紀錄頁完全不看權限，導致預設角色「操作員」的 `inventory:'edit'` 是空頭支票。`canEditPage()` / `canViewPage()` 定義了但零呼叫端。
+
+**需求（業主 2026-07-28 裁決）**
+
+1. 粒度維持 5 個頁面，不細分頁內區塊。
+2. 庫存頁「可編輯」= **只有入庫與數量修正**；其餘（水源轉移、包材/分類 CRUD、安全庫存、D+N、拖曳排序、代表圖片、叫貨通知、曲奇隱藏、已停用包材區）維持只有管理員。
+3. 設定頁**維持只有管理員**（不開放 view/edit）。
+4. 「可查看」看得到庫存數量、低水位警示、水源庫存數字（原本就如此，未改）。
+5. 紀錄頁 `view` = 只看自己的紀錄，`edit` = 看全部。
+6. **關閉自助註冊**，帳號一律由管理員在 /settings 建立。
+
+**設計**
+
+1. **權限純函式抽檔** — 新增 `src/lib/permissions.ts`（無 React 依賴，可被 node 直接 import 測試），`src/lib/auth.ts` 改 `export * from './permissions'`，呼叫端 import 路徑不變。新增三個函式：
+   - `canEditStock` = `inventory` 為 `edit`（入庫、數量修正）
+   - `canAdminInventory` = `is_admin`（破壞性動作）
+   - `canViewAllActivity` = `activity` 為 `edit`
+2. **庫存頁兩層 gate** — `isAdmin` 改為 `canAdminInventory(user)`（與原 `!!user?.is_admin` 等價，故其餘 34 處零漂移），另加 `canEdit`。恰好 6 處改吃 `canEdit`：`handleProductInbound`、`handleMaterialInbound`、`openAdjustDialog`、`handleAdjustSubmit`、成品卡與包材卡的「修正」鈕。頂部按鈕列拆成 叫貨通知(admin)／產品入庫(canEdit)／包材入庫(canEdit)／新增包材(admin)。
+3. **紀錄頁伺服器端過濾** — `canViewAllActivity` 為 false 時查詢加 `.eq('username', user.username)`，不是抓回來再前端篩；user 未 mount 時不送查詢（不 fail-open）。
+4. **關閉自助註冊（兩層）** — 前端移除註冊 UI 與 `signUp` 呼叫，改顯示「需要帳號請洽管理員開通」；migration 035 撤銷 `sign_up` 對 anon/authenticated/**PUBLIC** 的 EXECUTE（只撤前兩者會從 PUBLIC 繼承回來）。`admin_create_user` 未受影響，管理員新增帳號照常。
+
+**驗證**
+
+- `node scripts/verify-permissions.mjs` → 28/28（純函式，5 種角色 × 判斷函式）
+- `node scripts/verify-no-self-signup.mjs` → 前端靜態檢查 + 對正式庫的**零寫入**探針（故意用既有帳號名 `admin`，`sign_up` 會在 INSERT 前就因「帳號已被使用」中止）
+  - migration 035 執行前：HTTP 409「帳號 admin 已被使用」＝業務錯誤，證明 anon 可呼叫
+  - 執行後：HTTP 401 / `42501 permission denied for function sign_up` ＝已撤權
+- `npx tsc --noEmit` 0 error、`npm run build` 成功、登入頁真機驗證（無註冊入口、表單完好、console 零錯誤）
+
+**⚠ 已知未修的權限缺口（2026-07-28 抗辯確認，業主裁決暫緩）**
+
+本次只補了庫存頁與紀錄頁。以下為既有缺口，**授權目前全部只存在於 client render 層**：
+
+| 代號 | 缺口 | 影響 |
+|---|---|---|
+| S2 | `admin_*` RPC 全部 `GRANT TO anon`，`_assert_caller_admin` 只驗 client 自報的 UUID；而管理員 UUID 由 `activity_logs`（anon 可讀）洩漏 | 不需任何帳號即可建管理員／改密碼／刪帳號 |
+| S3 | `calendar/[date]` 日頁 1528 行零權限判斷，17 處寫入全裸；日期格 onClick 無 gate | `LAD1` 的 `adjustment_only` 形同虛設，可完整訂單 CRUD |
+| S4 | `/search` 不在 `app-shell.tsx` `pathToPage()` 的 5 條映射內 → URL guard 直接放行；該頁掛 `OrderFormDialog` 可編輯 | 任何登入者可讀改全部訂單 |
+| S5 | `admin / admin888` 仍是 active 管理員，`sign_in` 無次數限制 | — |
+| S6 | 只有 `sign_in` 查 `is_active`，`readUser()` 不回查 DB | 停用帳號的既有分頁最長續用 10 小時 |
+| S7 | localStorage 未簽章，改 `is_admin:true` 即解鎖 /settings | 低於 S2（S2 連帳號都不用） |
+
+詳細證據與重現路徑見 `.review/2026-07-28-security-findings.md`（該目錄不進版控）。結構性建議：在出現一個伺服器端 chokepoint（middleware 或真 session + RLS）之前，每修一條都只是補單一路由，新增路由會重新打開同類洞——`/search` 就是這樣漏的。
 
 ### 2026-05-19 — 包材代表圖片 + 水源低水位粉紅警示
 
@@ -1679,7 +1728,7 @@ metadata key 全中文：`客戶 / 日期 / 原日期 / 付款狀態 / 品項 / 
 
 ## 已知限制
 
-1. **公開存取** — 已移除登入，RLS 對 anon 全開；請確保此網站僅供內部團隊使用（不對外分享）
+1. **授權只在前端，RLS 對 anon 全開** — ⚠ 本條於 2026-07-28 更正：原文寫「已移除登入」**已過時**（migration 024/031 已重新加入 app_users 帳號系統）。正確描述是：登入存在，但 `014_open_public_access.sql` 對 12 張表建立 `FOR ALL TO anon USING (true)` 政策且從未收回，因此**所有授權都只是 client-side render 條件**，繞過前端直接打 Supabase REST API 即可讀寫。請確保此網站僅供內部團隊使用（不對外分享）。未修的具體缺口見「2026-07-28」變更紀錄的 S2–S7 表格。
 2. **base-ui Select 顯示** — `@base-ui/react` 的 SelectValue 不會自動顯示 ItemText，需在 children 中手動解析 UUID → 名稱
 3. **Realtime 需手動啟用** — 需在 Supabase Dashboard > Database > Publications 中將相關表加入 `supabase_realtime` publication
 
@@ -1707,6 +1756,8 @@ metadata key 全中文：`客戶 / 日期 / 原日期 / 付款狀態 / 品項 / 
 - ⏳ Migration 033 待執行（2026-05-19 — packaging_materials.image_url + Storage bucket `material-images` + policies）
 - ✅ 雙入蛋糕禮盒獨立分類 double_cake 前端支援（2026-07-14 — types.ts 加分類；order-form-dialog + calendar/[date] 內嵌 dialog 各加「雙入蛋糕禮盒」區塊【名稱+數量，無包裝/烙印，無品項時整塊隱藏】；split-order-dialog 追加區 existingDoubleCakes 分支+noCategoryAvailable；日頁生產彙總「雙入」卡；月曆格🍰計數；dashboard totalCakes/dailyCakeMap；settings CATEGORY_LABELS/ICONS🎁；audit-recipes.mjs 雙入解析規則【雙入-A+B 各0.25／雙入-A×2＝0.5／+午茶餅乾佔位不扣庫】；經 4 輪 skeptic/red-team/simplifier 對抗式審查）
 - ✅ Migration 034 已執行（2026-07-14 業主 Dashboard 執行，12 項 DB 斷言＋獨立驗收全過；**過渡期待辦**：操作者改掛「月中試吃-7月」後執行 034 檔尾【完成步驟】單行停用舊品項，屆時 audit-recipes 應 exit 0 — 雙入蛋糕禮盒：category CHECK 加 double_cake【動態重建，正式庫約束曾被手改與檔案史不符】＋種 9 變體 SKU＋12 配方＋36 通用包材列＋兩筆蘇玉芳訂單(cc1bb246/d6e6bd4b)改掛「雙入-經典原味+伯爵紅茶」並以 RPC 重算【7/14 -66/-66、7/15 -112/-112，移除幽靈茉莉】＋舊品項改名「雙入蛋糕禮盒(舊-勿用)」＋守門式停用；「月中試吃-7月」(ebff6fd7) 依業主指示由操作者上線後改掛正確組合，再執行檔尾【完成步驟】單行停用舊品項；034 跑完須手動 GET /api/line-notify 發校正叫貨通知；⚠ 整檔一次貼、勿分段、成功後勿重貼）
+- ✅ Migration 034 過渡期待辦**已收官**（2026-07-28 — 「月中試吃-7月」已由操作者改掛「雙入-茉莉花茶+午茶餅乾」×334，舊品項 `0961077a` 引用數歸零，業主執行檔尾【完成步驟】停用之；`node scripts/audit-recipes.mjs` 由 exit 1／5 錯誤轉為 **exit 0／0 錯誤 0 警告**）
+- ✅ Migration 035 已執行（2026-07-28 — 撤銷 `sign_up` 對 anon/authenticated/PUBLIC 的 EXECUTE；執行前後以零寫入探針實測 409 →「42501 permission denied」，`admin_create_user` 未受影響）
 - 📌 既知行為註記（2026-07-14 — inventory.quantity 為 integer：小數扣量寫入時四捨五入，例 446×0.25=111.5 → 存 112、334×0.25=83.5 → 存 84，非 bug；追加流程對停用品項的隱形/包材跳扣既有坑【order-form-dialog.tsx packaging 三元式+stock.ts !product continue】本次未修，見 034 檔頭過渡警語）
 
 ## 環境資訊

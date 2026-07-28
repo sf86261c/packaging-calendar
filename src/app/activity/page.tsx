@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
+import { canViewAllActivity, useCurrentUserClient } from '@/lib/auth'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { format, parseISO } from 'date-fns'
@@ -37,11 +38,14 @@ function formatDetail(meta: Record<string, unknown> | null, exclude: string[]): 
 
 export default function ActivityPage() {
   const supabase = createClient()
+  const { user, mounted } = useCurrentUserClient()
   const [logs, setLogs] = useState<ActivityRow[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('')
 
   useEffect(() => {
+    if (!mounted || !user) return
+
     let cancelled = false
 
     const fetchLogs = async () => {
@@ -53,9 +57,15 @@ export default function ActivityPage() {
         /* 失敗就忽略 */
       }
 
-      const { data } = await supabase
+      let query = supabase
         .from('activity_logs')
         .select('*')
+
+      if (!canViewAllActivity(user)) {
+        query = query.eq('username', user.username)
+      }
+
+      const { data } = await query
         .order('created_at', { ascending: false })
         .limit(500)
 
@@ -67,7 +77,7 @@ export default function ActivityPage() {
     return () => {
       cancelled = true
     }
-  }, [supabase])
+  }, [supabase, user, mounted])
 
   const filtered = filter.trim()
     ? logs.filter((l) => {

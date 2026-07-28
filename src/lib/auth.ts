@@ -2,11 +2,9 @@
 
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { createClient } from '@/lib/supabase'
+import type { UserPermissions } from './permissions'
 
-export type PageRoute = 'calendar' | 'dashboard' | 'inventory' | 'activity' | 'settings'
-export type PageMode = 'none' | 'view' | 'edit' | 'adjustment_only'
-
-export type UserPermissions = Partial<Record<PageRoute, PageMode>>
+export * from './permissions'
 
 export interface AuthUser {
   id: string
@@ -24,46 +22,6 @@ interface StoredSession {
   is_admin: boolean
   permissions: UserPermissions
   expiresAt: number
-}
-
-// ─── Permission helpers ────────────────────────────────────────────
-// is_admin → 永遠所有頁面 edit、永遠可用試吃/耗損/散單
-// 否則查 permissions[page]：
-//   - 'none' / 缺值（預設）→ 看不到
-//   - 'view' → 可看，不可改
-//   - 'edit' → 完整
-//   - 'adjustment_only' → calendar 限定，僅顯示「試吃/耗損/散單」按鈕
-
-const DEFAULT_NON_ADMIN_MODE: PageMode = 'none'
-
-export function getPageMode(user: AuthUser | null, page: PageRoute): PageMode {
-  if (!user) return 'none'
-  if (user.is_admin) return 'edit'
-  return user.permissions?.[page] ?? DEFAULT_NON_ADMIN_MODE
-}
-
-export function canAccessPage(user: AuthUser | null, page: PageRoute): boolean {
-  return getPageMode(user, page) !== 'none'
-}
-
-export function canEditPage(user: AuthUser | null, page: PageRoute): boolean {
-  return getPageMode(user, page) === 'edit'
-}
-
-export function canViewPage(user: AuthUser | null, page: PageRoute): boolean {
-  const m = getPageMode(user, page)
-  return m === 'view' || m === 'edit'
-}
-
-// 月曆頁的「試吃/耗損/散單」按鈕：edit 與 adjustment_only 兩種模式都可用
-export function canUseStockAdjustment(user: AuthUser | null): boolean {
-  const m = getPageMode(user, 'calendar')
-  return m === 'edit' || m === 'adjustment_only'
-}
-
-// 月曆頁的訂單操作（CRUD、進入日頁面）：只有 edit 才行
-export function canUseCalendarOrders(user: AuthUser | null): boolean {
-  return getPageMode(user, 'calendar') === 'edit'
 }
 
 // ─── Pub/sub for cross-component reactive updates ───
@@ -222,20 +180,9 @@ export async function signIn(username: string, password: string): Promise<AuthUs
   return user
 }
 
-export async function signUp(username: string, password: string): Promise<AuthUser> {
-  const supabase = createClient()
-  const { data, error } = await supabase.rpc('sign_up', {
-    p_username: username,
-    p_password: password,
-  })
-  if (error) throw new Error(`註冊失敗：${error.message}`)
-  if (!data || data.length === 0) {
-    throw new Error('註冊失敗：未取得帳號資訊')
-  }
-  const user = normalizeAuthUser(data[0])
-  writeUser(user)
-  return user
-}
+// signUp() 已於 2026-07-28 移除：自助註冊關閉（帳號改由管理員在 /settings 建立），
+// migration 035 亦撤銷了 sign_up RPC 對 anon 的 EXECUTE 權限。保留函式只會被打包進
+// client bundle 成為死碼。要恢復自助註冊需同時還原本函式、登入頁 UI 與 035 的 GRANT。
 
 export function signOut() {
   writeUser(null)

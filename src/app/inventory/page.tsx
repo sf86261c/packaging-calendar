@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { createClient } from '@/lib/supabase'
-import { useCurrentUserClient } from '@/lib/auth'
+import { canAdminInventory, canEditStock, useCurrentUserClient } from '@/lib/auth'
 import { logActivity } from '@/lib/activity'
 import { format, addDays } from 'date-fns'
 import {
@@ -136,7 +136,8 @@ function MaterialImageThumb({ url, name }: { url: string | null; name: string })
 export default function InventoryPage() {
   const supabase = createClient()
   const { user } = useCurrentUserClient()
-  const isAdmin = !!user?.is_admin
+  const isAdmin = canAdminInventory(user)
+  const canEdit = canEditStock(user)
   const [products, setProducts] = useState<ProductStock[]>([])
   const [materials, setMaterials] = useState<MaterialStock[]>([])
   const [loading, setLoading] = useState(true)
@@ -384,7 +385,7 @@ export default function InventoryPage() {
   // ─── Inbound handlers ──────────────────────────
 
   const handleProductInbound = async () => {
-    if (!isAdmin) return
+    if (!canEdit) return
     if (!pInboundProduct || !pInboundQty) return
     setSaving(true)
     await supabase.from('inventory').insert({
@@ -398,7 +399,7 @@ export default function InventoryPage() {
   }
 
   const handleMaterialInbound = async () => {
-    if (!isAdmin) return
+    if (!canEdit) return
     if (!mInboundMat || !mInboundQty) return
     const qty = parseInt(mInboundQty)
     if (Number.isNaN(qty) || qty <= 0) return
@@ -669,7 +670,7 @@ export default function InventoryPage() {
   }
 
   const openAdjustDialog = async (target: AdjustTarget) => {
-    if (!isAdmin) return
+    if (!canEdit) return
     setAdjustTarget(target)
     setAdjustNote('')
     setAdjustOpen(true)
@@ -681,7 +682,7 @@ export default function InventoryPage() {
   }
 
   const handleAdjustSubmit = async () => {
-    if (!isAdmin || !adjustTarget) return
+    if (!canEdit || !adjustTarget) return
     const newVal = parseInt(adjustNewValue, 10)
     if (Number.isNaN(newVal) || newVal < 0) {
       alert('請輸入有效的非負整數')
@@ -937,7 +938,7 @@ export default function InventoryPage() {
             <div className={`text-3xl font-bold ${isLow ? 'text-red-600' : ''}`}>
               {p.stock.toLocaleString()}
             </div>
-            {isAdmin && (
+            {canEdit && (
               <button
                 onClick={() => openAdjustDialog({ kind: 'product', id: p.id, name: p.name })}
                 className="ml-auto inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-600 hover:bg-blue-50 hover:text-blue-700"
@@ -1099,7 +1100,7 @@ export default function InventoryPage() {
               <span className="ml-1 text-sm font-normal text-gray-500">{m.unit}</span>
             </div>
             <MaterialImageThumb url={m.image_url} name={m.name} />
-            {isAdmin && (
+            {canEdit && (
               <button
                 onClick={() => openAdjustDialog({ kind: 'material', id: m.id, name: m.name, unit: m.unit })}
                 className="ml-auto inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-600 hover:bg-blue-50 hover:text-blue-700"
@@ -1171,27 +1172,35 @@ export default function InventoryPage() {
           )}
           <span className="text-xs text-gray-500">每項依各自到貨時間 D+N 計算未來庫存</span>
         </div>
-        {isAdmin && (
+        {(isAdmin || canEdit) && (
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleLineNotify}
-              disabled={sendingLine || loading}
-              className="h-8 text-xs border-orange-300 text-orange-700 hover:bg-orange-50"
-            >
-              {sendingLine ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Send className="mr-1 h-3 w-3" />}
-              叫貨通知
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setProductInboundOpen(true)}>
-              <Plus className="mr-1 h-4 w-4" /> 產品入庫
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setMaterialInboundOpen(true)}>
-              <Package className="mr-1 h-4 w-4" /> 包材入庫
-            </Button>
-            <Button size="sm" onClick={() => setMatAddOpen(true)}>
-              <Plus className="mr-1 h-4 w-4" /> 新增包材
-            </Button>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleLineNotify}
+                disabled={sendingLine || loading}
+                className="h-8 text-xs border-orange-300 text-orange-700 hover:bg-orange-50"
+              >
+                {sendingLine ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Send className="mr-1 h-3 w-3" />}
+                叫貨通知
+              </Button>
+            )}
+            {canEdit && (
+              <Button variant="outline" size="sm" onClick={() => setProductInboundOpen(true)}>
+                <Plus className="mr-1 h-4 w-4" /> 產品入庫
+              </Button>
+            )}
+            {canEdit && (
+              <Button variant="outline" size="sm" onClick={() => setMaterialInboundOpen(true)}>
+                <Package className="mr-1 h-4 w-4" /> 包材入庫
+              </Button>
+            )}
+            {isAdmin && (
+              <Button size="sm" onClick={() => setMatAddOpen(true)}>
+                <Plus className="mr-1 h-4 w-4" /> 新增包材
+              </Button>
+            )}
           </div>
         )}
       </div>

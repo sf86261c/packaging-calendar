@@ -39,6 +39,9 @@ yarn-error.log*
 # codegraph local index
 .codegraph/
 
+# 三方協作審查鷹架（工單／判定書／diff）
+.review/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
