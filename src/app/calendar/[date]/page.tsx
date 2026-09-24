@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { format, parseISO, addDays, subDays } from 'date-fns'
 import { zhTW } from 'date-fns/locale'
-import { ChevronLeft, ChevronRight, Plus, ArrowLeft, Trash2, Loader2, Pencil, Download } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, ArrowLeft, Trash2, Loader2, Pencil, Download, CircleCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -52,6 +52,7 @@ interface OrderRow {
   notes: string | null
   printed: boolean
   paid: boolean
+  production_completed: boolean
   cake_packaging_id: string | null
   cake_branding_id: string | null
   tube_packaging_id: string | null
@@ -75,6 +76,8 @@ export default function DayOrderPage() {
   const date = parseISO(dateStr)
 
   const [orders, setOrders] = useState<OrderRow[]>([])
+  const [completingOrderIds, setCompletingOrderIds] = useState<Set<string>>(new Set())
+  const completingOrderIdsRef = useRef(new Set<string>())
   const [products, setProducts] = useState<any[]>([])
   const [packagingStyles, setPackagingStyles] = useState<any[]>([])
   const [brandingStyles, setBrandingStyles] = useState<any[]>([])
@@ -120,7 +123,7 @@ export default function DayOrderPage() {
     const { data } = await supabase
       .from('orders')
       .select(`
-        id, customer_name, status, batch_info, batch_group_id, notes, printed, paid, single_cake_branding_text,
+        id, customer_name, status, batch_info, batch_group_id, notes, printed, paid, production_completed, single_cake_branding_text,
         cake_packaging_id, cake_branding_id, tube_packaging_id, single_cake_packaging_id,
         cake_packaging:packaging_styles!orders_cake_packaging_id_fkey(id, name),
         cake_branding:branding_styles!orders_cake_branding_id_fkey(id, name),
@@ -141,6 +144,7 @@ export default function DayOrderPage() {
         notes: o.notes ?? null,
         printed: o.printed,
         paid: !!o.paid,
+        production_completed: !!o.production_completed,
         cake_packaging_id: o.cake_packaging_id,
         cake_branding_id: o.cake_branding_id,
         tube_packaging_id: o.tube_packaging_id,
@@ -522,6 +526,36 @@ export default function DayOrderPage() {
       客戶: target?.customer_name ?? '',
       日期: dateStr,
     })
+  }
+
+  const handleProductionCompletedToggle = async (order: OrderRow) => {
+    if (!canEditOrders || completingOrderIdsRef.current.has(order.id)) return
+    completingOrderIdsRef.current.add(order.id)
+    setCompletingOrderIds(new Set(completingOrderIdsRef.current))
+    const productionCompleted = !order.production_completed
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .update({ production_completed: productionCompleted })
+        .eq('id', order.id)
+        .select('id, production_completed')
+        .single()
+      if (error || !data) {
+        throw new Error(`更新製作完成狀態失敗：${error?.message ?? '找不到訂單或無權限更新'}`)
+      }
+      setOrders(prev => prev.map(o => o.id === data.id
+        ? { ...o, production_completed: data.production_completed }
+        : o))
+      await logActivity(productionCompleted ? '標記製作完成' : '取消製作完成', `order:${order.id}`, {
+        客戶: order.customer_name,
+        日期: dateStr,
+      })
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err))
+    } finally {
+      completingOrderIdsRef.current.delete(order.id)
+      setCompletingOrderIds(new Set(completingOrderIdsRef.current))
+    }
   }
 
   // ─── Split / Append 分批 ─────────────────────────────
@@ -1034,7 +1068,7 @@ export default function DayOrderPage() {
                     <TableHead className="w-20">客戶</TableHead>
                     <TableHead>品項</TableHead>
                     <TableHead className="w-40 hidden md:table-cell">包裝/烙印</TableHead>
-                    <TableHead className="w-20"></TableHead>
+                    <TableHead className="w-28"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1042,7 +1076,7 @@ export default function DayOrderPage() {
                     const siblings = batchSiblings[order.id] || []
                     return (
                       <Fragment key={order.id}>
-                        <TableRow className={order.printed ? 'bg-yellow-100' : ''}>
+                        <TableRow className={order.production_completed ? 'bg-[#d9f99d] hover:bg-[#d9f99d]' : order.printed ? 'bg-yellow-100' : ''}>
                           <TableCell>
                             {canEditOrders && (
                               <Checkbox
@@ -1111,13 +1145,29 @@ export default function DayOrderPage() {
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
                               )}
+                              {canEditOrders && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className={`h-7 w-7 hover:text-lime-800 ${order.production_completed ? 'text-lime-800' : 'text-gray-400'}`}
+                                  onClick={() => handleProductionCompletedToggle(order)}
+                                  disabled={completingOrderIds.has(order.id)}
+                                  aria-label={order.production_completed ? '取消製作完成' : '製作完成'}
+                                  aria-pressed={order.production_completed}
+                                  title={order.production_completed ? '取消製作完成' : '製作完成'}
+                                >
+                                  {completingOrderIds.has(order.id)
+                                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    : <CircleCheck className="h-3.5 w-3.5" />}
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
                         {siblings.length > 0 && (
                           <TableRow
                             data-testid="batch-siblings-row"
-                            className={`hover:bg-transparent ${order.printed ? 'bg-yellow-50' : 'bg-gray-50/40'}`}
+                            className={order.production_completed ? 'bg-[#ecfccb] hover:bg-[#ecfccb]' : `hover:bg-transparent ${order.printed ? 'bg-yellow-50' : 'bg-gray-50/40'}`}
                           >
                             <TableCell colSpan={7} className="py-1.5 px-3">
                               <div className="text-xs text-gray-400 leading-relaxed">
