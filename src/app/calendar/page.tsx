@@ -328,6 +328,7 @@ export default function CalendarPage() {
         map[date].orders++
         if (order.production_completed) map[date].completed++
         if (!(order as any).printed) map[date].pending++
+        if (order.production_completed) continue
         const items = (order as any).order_items || []
         for (const item of items) {
           const cat = item.product?.category
