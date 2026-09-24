@@ -22,6 +22,7 @@ import type { Product, PackagingStyle, ProductRecipe, ProductMaterialUsage } fro
 
 interface DaySummary {
   orders: number
+  completed: number
   cakes: number
   cookies: number
   tubes: number
@@ -315,7 +316,7 @@ export default function CalendarPage() {
 
     const { data: orders } = await supabase
       .from('orders')
-      .select('id, order_date, status, printed, order_items(quantity, product:products(category))')
+      .select('id, order_date, status, printed, production_completed, order_items(quantity, product:products(category))')
       .gte('order_date', monthStart)
       .lte('order_date', monthEnd)
 
@@ -323,8 +324,9 @@ export default function CalendarPage() {
     if (orders) {
       for (const order of orders) {
         const date = order.order_date
-        if (!map[date]) map[date] = { orders: 0, cakes: 0, cookies: 0, tubes: 0, pending: 0 }
+        if (!map[date]) map[date] = { orders: 0, completed: 0, cakes: 0, cookies: 0, tubes: 0, pending: 0 }
         map[date].orders++
+        if (order.production_completed) map[date].completed++
         if (!(order as any).printed) map[date].pending++
         const items = (order as any).order_items || []
         for (const item of items) {
@@ -511,7 +513,7 @@ export default function CalendarPage() {
               </div>
               {s && s.orders > 0 && (
                 <div className="mt-1 space-y-1">
-                  <div className="text-xs text-gray-500">{s.orders} 筆訂單</div>
+                  <div className="break-all text-[10px] text-gray-500 sm:break-normal sm:text-xs">{s.orders}筆訂單/{s.completed}筆完成</div>
                   <div className="flex flex-wrap gap-1">
                     {s.cakes > 0 && <Badge variant="secondary" className="text-[10px] px-1 py-0">🍰 {s.cakes}</Badge>}
                     {s.cookies > 0 && <Badge variant="secondary" className="text-[10px] px-1 py-0">🍪 {s.cookies}</Badge>}
